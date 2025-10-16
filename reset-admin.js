@@ -4,7 +4,7 @@
 import fetch from 'node-fetch';
 import readline from 'readline';
 
-const API_URL = 'http://localhost:5000';
+const API_URL = 'https://server808.vercel.app';
 
 const rl = readline.createInterface({
   input: process.stdin,
