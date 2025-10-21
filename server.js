@@ -3,6 +3,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
+import articlesRoutes from "./routes/articles.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -27,6 +28,15 @@ app.use("/api/auth", (req, res, next) => {
   }
   next();
 }, authRoutes);
+
+// Articles routes (protected routes for POST, PUT, DELETE)
+app.use("/api/articles", (req, res, next) => {
+  // Apply auth middleware only to POST, PUT, DELETE requests
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE') {
+    return authMiddleware(req, res, next);
+  }
+  next();
+}, articlesRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
