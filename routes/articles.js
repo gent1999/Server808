@@ -1,14 +1,53 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
+import multer from "multer";
+import cloudinary from "../config/cloudinary.js";
+import { Readable } from "stream";
 
 const router = express.Router();
+
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed!'), false);
+    }
+  }
+});
+
+// Helper function to upload buffer to Cloudinary
+const uploadToCloudinary = (buffer, folder = 'rap-blog') => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder,
+        resource_type: 'auto'
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+
+    const readableStream = Readable.from(buffer);
+    readableStream.pipe(uploadStream);
+  });
+};
 
 // @route   POST /api/articles
 // @desc    Create a new article
 // @access  Private (requires admin authentication)
 router.post(
   "/",
+  upload.single('image'), // Handle single image upload
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("author").trim().notEmpty().withMessage("Author is required"),
@@ -23,6 +62,20 @@ router.post(
     const { title, author, content, tags } = req.body;
 
     try {
+      let imageUrl = null;
+
+      // Upload image to Cloudinary if file is provided
+      if (req.file) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.file.buffer);
+          imageUrl = uploadResult.secure_url;
+          console.log('Image uploaded to Cloudinary:', imageUrl);
+        } catch (uploadError) {
+          console.error('Cloudinary upload error:', uploadError);
+          return res.status(500).json({ message: "Failed to upload image" });
+        }
+      }
+
       // Parse tags if it's a string (from FormData)
       let tagsArray = [];
       if (tags) {
@@ -33,12 +86,12 @@ router.post(
         }
       }
 
-      // Insert article into database
+      // Insert article into database with image_url
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, title, author, content, tags, created_at, updated_at`,
-        [title, author, content, tagsArray]
+        `INSERT INTO articles (title, author, content, tags, image_url)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, title, author, content, tags, image_url, created_at, updated_at`,
+        [title, author, content, tagsArray, imageUrl]
       );
 
       const newArticle = result.rows[0];
