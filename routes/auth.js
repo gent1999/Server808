@@ -2,11 +2,9 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { body, validationResult } from "express-validator";
+import pool from "../config/db.js";
 
 const router = express.Router();
-
-// In-memory admin storage (replace with database later)
-const admins = [];
 
 // @route   POST /api/auth/register
 // @desc    Register a new admin
@@ -27,20 +25,24 @@ router.post(
     const { username, email, password } = req.body;
 
     try {
-      // Only allow registration if no admins exist yet (first admin only)
-      if (admins.length > 0) {
+      // Check if any admins exist (only allow one admin)
+      const countResult = await pool.query('SELECT COUNT(*) FROM admins');
+      const adminCount = parseInt(countResult.rows[0].count);
+
+      if (adminCount > 0) {
         return res.status(403).json({
           message: "Admin registration is closed. Only one admin account is allowed.",
           registrationClosed: true
         });
       }
 
-      // Check if admin already exists (extra safety check)
-      const adminExists = admins.find(
-        (admin) => admin.email === email || admin.username === username
+      // Check if admin already exists by email or username
+      const existingAdmin = await pool.query(
+        'SELECT * FROM admins WHERE email = $1 OR username = $2',
+        [email, username]
       );
 
-      if (adminExists) {
+      if (existingAdmin.rows.length > 0) {
         return res.status(400).json({ message: "Admin already exists" });
       }
 
@@ -48,16 +50,13 @@ router.post(
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(password, salt);
 
-      // Create admin
-      const newAdmin = {
-        id: admins.length + 1,
-        username,
-        email,
-        password: hashedPassword,
-        createdAt: new Date(),
-      };
+      // Insert admin into database
+      const result = await pool.query(
+        'INSERT INTO admins (username, email, password) VALUES ($1, $2, $3) RETURNING id, username, email, created_at',
+        [username, email, hashedPassword]
+      );
 
-      admins.push(newAdmin);
+      const newAdmin = result.rows[0];
 
       // Create JWT token
       const payload = {
@@ -110,12 +109,17 @@ router.post(
     const { email, password } = req.body;
 
     try {
-      // Find admin by email
-      const admin = admins.find((admin) => admin.email === email);
+      // Find admin by email in database
+      const result = await pool.query(
+        'SELECT * FROM admins WHERE email = $1',
+        [email]
+      );
 
-      if (!admin) {
+      if (result.rows.length === 0) {
         return res.status(400).json({ message: "Invalid credentials" });
       }
+
+      const admin = result.rows[0];
 
       // Check password
       const isMatch = await bcrypt.compare(password, admin.password);
@@ -172,13 +176,21 @@ router.get("/me", async (req, res) => {
 // @route   GET /api/auth/registration-status
 // @desc    Check if registration is available
 // @access  Public
-router.get("/registration-status", (req, res) => {
-  res.json({
-    registrationOpen: admins.length === 0,
-    message: admins.length === 0
-      ? "Registration is open for the first admin"
-      : "Registration is closed"
-  });
+router.get("/registration-status", async (req, res) => {
+  try {
+    const result = await pool.query('SELECT COUNT(*) FROM admins');
+    const adminCount = parseInt(result.rows[0].count);
+
+    res.json({
+      registrationOpen: adminCount === 0,
+      message: adminCount === 0
+        ? "Registration is open for the first admin"
+        : "Registration is closed"
+    });
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ message: "Server error" });
+  }
 });
 
 // @route   DELETE /api/auth/delete-account
@@ -188,14 +200,15 @@ router.delete("/delete-account", async (req, res) => {
   try {
     const adminId = req.admin.id;
 
-    // Find and remove the admin
-    const adminIndex = admins.findIndex(admin => admin.id === adminId);
+    // Delete admin from database
+    const result = await pool.query(
+      'DELETE FROM admins WHERE id = $1 RETURNING *',
+      [adminId]
+    );
 
-    if (adminIndex === -1) {
+    if (result.rows.length === 0) {
       return res.status(404).json({ message: "Admin not found" });
     }
-
-    admins.splice(adminIndex, 1);
 
     res.json({
       message: "Account deleted successfully. Registration is now open for a new admin.",
