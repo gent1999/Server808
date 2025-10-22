@@ -18,3 +18,9 @@ CREATE TABLE IF NOT EXISTS articles (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Add spotify_url column to existing articles table
+ALTER TABLE articles ADD COLUMN spotify_url TEXT;
+
+-- Add youtube_url column to existing articles table
+ALTER TABLE articles ADD COLUMN youtube_url TEXT;

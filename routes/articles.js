@@ -59,7 +59,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url } = req.body;
 
     try {
       let imageUrl = null;
@@ -86,12 +86,12 @@ router.post(
         }
       }
 
-      // Insert article into database with image_url
+      // Insert article into database with image_url, spotify_url, and youtube_url
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url)
-         VALUES ($1, $2, $3, $4, $5)
-         RETURNING id, title, author, content, tags, image_url, created_at, updated_at`,
-        [title, author, content, tagsArray, imageUrl]
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, created_at, updated_at`,
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null]
       );
 
       const newArticle = result.rows[0];
@@ -113,7 +113,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, tags, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, created_at, updated_at FROM articles ORDER BY created_at DESC'
     );
 
     res.json({
@@ -134,7 +134,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, tags, created_at, updated_at FROM articles WHERE id = $1',
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, created_at, updated_at FROM articles WHERE id = $1',
       [id]
     );
 
@@ -156,6 +156,7 @@ router.get("/:id", async (req, res) => {
 // @access  Private (requires admin authentication)
 router.put(
   "/:id",
+  upload.single('image'), // Handle single image upload
   [
     body("title").optional().trim().notEmpty().withMessage("Title cannot be empty"),
     body("author").optional().trim().notEmpty().withMessage("Author cannot be empty"),
@@ -168,7 +169,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url } = req.body;
 
     try {
       // Check if article exists
@@ -176,6 +177,20 @@ router.put(
 
       if (checkResult.rows.length === 0) {
         return res.status(404).json({ message: "Article not found" });
+      }
+
+      let imageUrl = null;
+
+      // Upload new image to Cloudinary if file is provided
+      if (req.file) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.file.buffer);
+          imageUrl = uploadResult.secure_url;
+          console.log('New image uploaded to Cloudinary:', imageUrl);
+        } catch (uploadError) {
+          console.error('Cloudinary upload error:', uploadError);
+          return res.status(500).json({ message: "Failed to upload image" });
+        }
       }
 
       // Parse tags if it's a string (from FormData)
@@ -188,17 +203,20 @@ router.put(
         }
       }
 
-      // Update article
+      // Update article (only update image_url if a new image was uploaded)
       const result = await pool.query(
         `UPDATE articles
          SET title = COALESCE($1, title),
              author = COALESCE($2, author),
              content = COALESCE($3, content),
              tags = COALESCE($4, tags),
+             image_url = COALESCE($5, image_url),
+             spotify_url = COALESCE($6, spotify_url),
+             youtube_url = COALESCE($7, youtube_url),
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $5
-         RETURNING id, title, author, content, tags, created_at, updated_at`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, id]
+         WHERE id = $8
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, created_at, updated_at`,
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, id]
       );
 
       res.json({
