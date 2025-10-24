@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
 import articlesRoutes from "./routes/articles.js";
+import newsletterRoutes from "./routes/newsletter.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -37,6 +38,15 @@ app.use("/api/articles", (req, res, next) => {
   }
   next();
 }, articlesRoutes);
+
+// Newsletter routes (public subscribe, protected admin routes)
+app.use("/api/newsletter", (req, res, next) => {
+  // Apply auth middleware only to GET /subscribers (admin viewing subscribers)
+  if (req.path === '/subscribers' && req.method === 'GET') {
+    return authMiddleware(req, res, next);
+  }
+  next();
+}, newsletterRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {

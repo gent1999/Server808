@@ -27,3 +27,11 @@ ALTER TABLE articles ADD COLUMN youtube_url TEXT;
 
 -- Add category column to existing articles table (for articles vs interviews)
 ALTER TABLE articles ADD COLUMN category VARCHAR(50) DEFAULT 'article' CHECK (category IN ('article', 'interview'));
+
+-- Newsletter Subscribers Table
+CREATE TABLE IF NOT EXISTS newsletter_subscribers (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_active BOOLEAN DEFAULT true
+);
