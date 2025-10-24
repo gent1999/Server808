@@ -24,3 +24,6 @@ ALTER TABLE articles ADD COLUMN spotify_url TEXT;
 
 -- Add youtube_url column to existing articles table
 ALTER TABLE articles ADD COLUMN youtube_url TEXT;
+
+-- Add category column to existing articles table (for articles vs interviews)
+ALTER TABLE articles ADD COLUMN category VARCHAR(50) DEFAULT 'article' CHECK (category IN ('article', 'interview'));
