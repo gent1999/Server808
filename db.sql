@@ -28,6 +28,9 @@ ALTER TABLE articles ADD COLUMN youtube_url TEXT;
 -- Add category column to existing articles table (for articles vs interviews)
 ALTER TABLE articles ADD COLUMN category VARCHAR(50) DEFAULT 'article' CHECK (category IN ('article', 'interview'));
 
+-- Add is_featured column to articles table (only one article can be featured at a time)
+ALTER TABLE articles ADD COLUMN is_featured BOOLEAN DEFAULT false;
+
 -- Newsletter Subscribers Table
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   id SERIAL PRIMARY KEY,

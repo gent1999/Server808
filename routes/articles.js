@@ -115,7 +115,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles ORDER BY created_at DESC'
     );
 
     res.json({
@@ -128,6 +128,37 @@ router.get("/", async (req, res) => {
   }
 });
 
+// @route   GET /api/articles/featured
+// @desc    Get featured article
+// @access  Public
+router.get("/featured/article", async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
+    );
+
+    // If no featured article, return the latest one
+    if (result.rows.length === 0) {
+      const latestResult = await pool.query(
+        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
+      );
+
+      return res.json({
+        article: latestResult.rows[0] || null,
+        isFallback: true
+      });
+    }
+
+    res.json({
+      article: result.rows[0],
+      isFallback: false
+    });
+  } catch (error) {
+    console.error('Error fetching featured article:', error.message);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // @route   GET /api/articles/:id
 // @desc    Get single article by ID
 // @access  Public
@@ -136,7 +167,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, created_at, updated_at FROM articles WHERE id = $1',
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles WHERE id = $1',
       [id]
     );
 
@@ -218,7 +249,7 @@ router.put(
              category = COALESCE($8, category),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $9
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, created_at, updated_at`,
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, is_featured, created_at, updated_at`,
         [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, category || null, id]
       );
 

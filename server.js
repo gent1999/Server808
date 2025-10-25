@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
 import articlesRoutes from "./routes/articles.js";
 import newsletterRoutes from "./routes/newsletter.js";
+import featuredRoutes from "./routes/featured.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -47,6 +48,9 @@ app.use("/api/newsletter", (req, res, next) => {
   }
   next();
 }, newsletterRoutes);
+
+// Featured article routes (protected)
+app.use("/api/featured", authMiddleware, featuredRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
