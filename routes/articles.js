@@ -59,12 +59,12 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags, spotify_url, youtube_url, category } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, category, image_url } = req.body;
 
     try {
-      let imageUrl = null;
+      let imageUrl = image_url || null; // Use provided URL if exists
 
-      // Upload image to Cloudinary if file is provided
+      // Upload image to Cloudinary if file is provided (overrides URL)
       if (req.file) {
         try {
           const uploadResult = await uploadToCloudinary(req.file.buffer);
@@ -74,6 +74,8 @@ router.post(
           console.error('Cloudinary upload error:', uploadError);
           return res.status(500).json({ message: "Failed to upload image" });
         }
+      } else if (image_url) {
+        console.log('Using provided image URL:', image_url);
       }
 
       // Parse tags if it's a string (from FormData)
