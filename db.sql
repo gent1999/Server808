@@ -38,3 +38,20 @@ CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   subscribed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   is_active BOOLEAN DEFAULT true
 );
+
+-- Music Submissions Table
+CREATE TABLE IF NOT EXISTS music_submissions (
+  id SERIAL PRIMARY KEY,
+  artist_name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  youtube_url TEXT,
+  spotify_url TEXT,
+  submission_type VARCHAR(50) DEFAULT 'regular' CHECK (submission_type IN ('regular', 'featured')),
+  payment_amount INTEGER NOT NULL,
+  payment_id VARCHAR(255) NOT NULL,
+  payment_status VARCHAR(50) DEFAULT 'pending',
+  submission_status VARCHAR(50) DEFAULT 'pending',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

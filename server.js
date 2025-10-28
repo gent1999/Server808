@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth.js";
 import articlesRoutes from "./routes/articles.js";
 import newsletterRoutes from "./routes/newsletter.js";
 import featuredRoutes from "./routes/featured.js";
+import submissionsRoutes from "./routes/submissions.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -51,6 +52,9 @@ app.use("/api/newsletter", (req, res, next) => {
 
 // Featured article routes (protected)
 app.use("/api/featured", authMiddleware, featuredRoutes);
+
+// Submissions routes (public for payment, can add auth for viewing)
+app.use("/api/submissions", submissionsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
