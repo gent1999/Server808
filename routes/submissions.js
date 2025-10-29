@@ -144,8 +144,8 @@ router.post(
       }
 
       // If content is provided, validate length
-      if (hasContent && (content.trim().length < 300 || content.trim().length > 800)) {
-        return res.status(400).json({ message: "Content must be between 300 and 800 characters" });
+      if (hasContent && (content.trim().length < 300 || content.trim().length > 5000)) {
+        return res.status(400).json({ message: "Content must be between 300 and 5000 characters" });
       }
 
       // Verify payment with Stripe
