@@ -244,4 +244,94 @@ router.get("/", async (req, res) => {
   }
 });
 
+// @route   POST /api/submissions/:id/publish
+// @desc    Publish a submission as an article
+// @access  Private (admin only)
+router.post("/:id/publish", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Get submission details
+    const submissionResult = await pool.query(
+      'SELECT * FROM music_submissions WHERE id = $1',
+      [id]
+    );
+
+    if (submissionResult.rows.length === 0) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    const submission = submissionResult.rows[0];
+
+    // Check if already published
+    if (submission.submission_status === 'approved') {
+      return res.status(400).json({ message: "Submission already published" });
+    }
+
+    // Create article from submission
+    const articleResult = await pool.query(
+      `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, category, is_featured)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, title, author, created_at`,
+      [
+        submission.title,
+        submission.artist_name,
+        submission.content || 'Content provided via document upload. Please check submission details.',
+        submission.image_url,
+        submission.youtube_url,
+        submission.spotify_url,
+        'article',
+        submission.submission_type === 'featured'
+      ]
+    );
+
+    // Update submission status to approved
+    await pool.query(
+      'UPDATE music_submissions SET submission_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      ['approved', id]
+    );
+
+    res.json({
+      message: "Article published successfully",
+      article: articleResult.rows[0]
+    });
+  } catch (error) {
+    console.error('Error publishing submission:', error.message);
+    res.status(500).json({ message: "Failed to publish article" });
+  }
+});
+
+// @route   PUT /api/submissions/:id/status
+// @desc    Update submission status
+// @access  Private (admin only)
+router.put("/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  // Validate status
+  const validStatuses = ['pending', 'approved', 'rejected'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ message: "Invalid status" });
+  }
+
+  try {
+    const result = await pool.query(
+      'UPDATE music_submissions SET submission_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Submission not found" });
+    }
+
+    res.json({
+      message: "Status updated successfully",
+      submission: result.rows[0]
+    });
+  } catch (error) {
+    console.error('Error updating submission status:', error.message);
+    res.status(500).json({ message: "Failed to update status" });
+  }
+});
+
 export default router;

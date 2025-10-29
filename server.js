@@ -53,8 +53,17 @@ app.use("/api/newsletter", (req, res, next) => {
 // Featured article routes (protected)
 app.use("/api/featured", authMiddleware, featuredRoutes);
 
-// Submissions routes (public for payment, can add auth for viewing)
-app.use("/api/submissions", submissionsRoutes);
+// Submissions routes (public for submitting, protected for admin actions)
+app.use("/api/submissions", (req, res, next) => {
+  // Apply auth middleware to admin-only routes
+  const adminPaths = ['/publish', '/status'];
+  const isAdminRoute = adminPaths.some(path => req.path.includes(path));
+
+  if (isAdminRoute || (req.method === 'GET' && req.path === '/')) {
+    return authMiddleware(req, res, next);
+  }
+  next();
+}, submissionsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
