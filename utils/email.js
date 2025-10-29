@@ -19,7 +19,7 @@ export async function sendOwnerNotification(submissionData) {
   try {
     const transporter = createTransporter();
 
-    const { artist_name, email, submission_type, payment_amount, content, youtube_url, spotify_url } = submissionData;
+    const { artist_name, email, submission_type, payment_amount, content, youtube_url, spotify_url, image_url, document_url } = submissionData;
 
     const submissionTypeLabel = submission_type === 'featured' ? '🏆 Featured Article' : '📰 Regular Article';
     const amount = (payment_amount / 100).toFixed(2); // Convert cents to dollars
@@ -46,10 +46,33 @@ export async function sendOwnerNotification(submissionData) {
               <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
             </div>
 
+            ${content ? `
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h3 style="color: #333; margin-top: 0;">Submission Content</h3>
               <p style="white-space: pre-wrap; line-height: 1.6;">${content}</p>
             </div>
+            ` : ''}
+
+            ${document_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">📄 Submitted Document</h3>
+              <p style="margin-bottom: 10px;">The artist uploaded a document file with their content:</p>
+              <a href="${document_url}" style="display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 8px; font-weight: bold;">
+                📥 Download Document
+              </a>
+              <p style="margin-top: 10px; font-size: 12px; color: #666;">
+                <a href="${document_url}" style="color: #667eea; word-break: break-all;">${document_url}</a>
+              </p>
+            </div>
+            ` : ''}
+
+            ${image_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">📸 Submitted Image</h3>
+              <img src="${image_url}" alt="Submission image" style="max-width: 100%; height: auto; border-radius: 8px;" />
+              <p style="margin-top: 10px;"><a href="${image_url}" style="color: #667eea;">View Full Size</a></p>
+            </div>
+            ` : ''}
 
             ${youtube_url ? `
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">

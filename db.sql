@@ -31,6 +31,12 @@ ALTER TABLE articles ADD COLUMN category VARCHAR(50) DEFAULT 'article' CHECK (ca
 -- Add is_featured column to articles table (only one article can be featured at a time)
 ALTER TABLE articles ADD COLUMN is_featured BOOLEAN DEFAULT false;
 
+-- Add image_url column to music_submissions table
+ALTER TABLE music_submissions ADD COLUMN image_url TEXT;
+
+-- Add document_url column to music_submissions table (for uploaded txt/doc/pdf files)
+ALTER TABLE music_submissions ADD COLUMN document_url TEXT;
+
 -- Newsletter Subscribers Table
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   id SERIAL PRIMARY KEY,

@@ -2,10 +2,64 @@ import express from "express";
 import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
 import Stripe from "stripe";
+import multer from "multer";
+import cloudinary from "../config/cloudinary.js";
+import { Readable } from "stream";
 import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.js";
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// Configure multer for memory storage
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    // Allow images for the image field
+    if (file.fieldname === 'image' && file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    }
+    // Allow documents (txt, doc, docx, pdf) for the document field
+    else if (file.fieldname === 'document') {
+      const allowedMimeTypes = [
+        'text/plain',
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      ];
+      if (allowedMimeTypes.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only txt, doc, docx, and pdf files are allowed for documents!'), false);
+      }
+    }
+    else {
+      cb(new Error('Invalid file type!'), false);
+    }
+  }
+});
+
+// Helper function to upload buffer to Cloudinary
+const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder,
+        resource_type: resourceType
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+
+    const readableStream = Readable.from(buffer);
+    readableStream.pipe(uploadStream);
+  });
+};
 
 // @route   POST /api/submissions/create-payment-intent
 // @desc    Create a Stripe payment intent for music submission
@@ -61,10 +115,14 @@ router.post(
 // @access  Public
 router.post(
   "/submit",
+  upload.fields([
+    { name: 'image', maxCount: 1 },
+    { name: 'document', maxCount: 1 }
+  ]),
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
-    body("content").trim().notEmpty().withMessage("Content is required"),
+    // Content is optional if document is provided
     body("payment_id").trim().notEmpty().withMessage("Payment ID is required"),
     body("submission_type").isIn(['regular', 'featured']).withMessage("Invalid submission type"),
   ],
@@ -77,6 +135,19 @@ router.post(
     const { artist_name, email, content, youtube_url, spotify_url, payment_id, submission_type } = req.body;
 
     try {
+      // Validate that either content or document is provided
+      const hasContent = content && content.trim().length > 0;
+      const hasDocument = req.files && req.files['document'] && req.files['document'].length > 0;
+
+      if (!hasContent && !hasDocument) {
+        return res.status(400).json({ message: "Either content text or document file is required" });
+      }
+
+      // If content is provided, validate length
+      if (hasContent && (content.trim().length < 300 || content.trim().length > 800)) {
+        return res.status(400).json({ message: "Content must be between 300 and 800 characters" });
+      }
+
       // Verify payment with Stripe
       const paymentIntent = await stripe.paymentIntents.retrieve(payment_id);
 
@@ -87,12 +158,38 @@ router.post(
       // Get payment amount from payment intent
       const payment_amount = paymentIntent.amount;
 
+      // Upload image to Cloudinary if provided
+      let imageUrl = null;
+      if (req.files && req.files['image'] && req.files['image'].length > 0) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer, 'submissions', 'image');
+          imageUrl = uploadResult.secure_url;
+          console.log('Image uploaded to Cloudinary (submissions folder):', imageUrl);
+        } catch (uploadError) {
+          console.error('Cloudinary image upload error:', uploadError);
+          return res.status(500).json({ message: "Failed to upload image" });
+        }
+      }
+
+      // Upload document to Cloudinary if provided
+      let documentUrl = null;
+      if (hasDocument) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['document'][0].buffer, 'submissions', 'raw');
+          documentUrl = uploadResult.secure_url;
+          console.log('Document uploaded to Cloudinary (submissions folder):', documentUrl);
+        } catch (uploadError) {
+          console.error('Cloudinary document upload error:', uploadError);
+          return res.status(500).json({ message: "Failed to upload document" });
+        }
+      }
+
       // Save submission to database
       const result = await pool.query(
-        `INSERT INTO music_submissions (artist_name, email, content, youtube_url, spotify_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO music_submissions (artist_name, email, content, youtube_url, spotify_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
          RETURNING id, artist_name, email, submission_type, created_at`,
-        [artist_name, email, content, youtube_url || null, spotify_url || null, submission_type, payment_amount, payment_id, 'completed', 'pending']
+        [artist_name, email, content || null, youtube_url || null, spotify_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
       );
 
       // Send email notifications (don't wait for them, send async)
@@ -104,6 +201,8 @@ router.post(
         content,
         youtube_url,
         spotify_url,
+        image_url: imageUrl,
+        document_url: documentUrl,
       }).catch(err => console.error('Error sending owner notification:', err));
 
       sendCustomerConfirmation({
