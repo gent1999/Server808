@@ -37,6 +37,9 @@ ALTER TABLE music_submissions ADD COLUMN image_url TEXT;
 -- Add document_url column to music_submissions table (for uploaded txt/doc/pdf files)
 ALTER TABLE music_submissions ADD COLUMN document_url TEXT;
 
+-- Add title column to music_submissions table
+ALTER TABLE music_submissions ADD COLUMN title VARCHAR(500);
+
 -- Newsletter Subscribers Table
 CREATE TABLE IF NOT EXISTS newsletter_subscribers (
   id SERIAL PRIMARY KEY,

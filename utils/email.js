@@ -19,7 +19,7 @@ export async function sendOwnerNotification(submissionData) {
   try {
     const transporter = createTransporter();
 
-    const { artist_name, email, submission_type, payment_amount, content, youtube_url, spotify_url, image_url, document_url } = submissionData;
+    const { artist_name, email, title, submission_type, payment_amount, content, youtube_url, spotify_url, image_url, document_url } = submissionData;
 
     const submissionTypeLabel = submission_type === 'featured' ? '🏆 Featured Article' : '📰 Regular Article';
     const amount = (payment_amount / 100).toFixed(2); // Convert cents to dollars
@@ -44,6 +44,11 @@ export async function sendOwnerNotification(submissionData) {
               <h3 style="color: #333; margin-top: 0;">Artist Information</h3>
               <p><strong>Artist Name:</strong> ${artist_name}</p>
               <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
+            </div>
+
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">Article Title</h3>
+              <p style="font-size: 18px; font-weight: bold; color: #667eea;">${title}</p>
             </div>
 
             ${content ? `

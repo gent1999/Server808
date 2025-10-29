@@ -122,6 +122,7 @@ router.post(
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
+    body("title").trim().notEmpty().withMessage("Title is required"),
     // Content is optional if document is provided
     body("payment_id").trim().notEmpty().withMessage("Payment ID is required"),
     body("submission_type").isIn(['regular', 'featured']).withMessage("Invalid submission type"),
@@ -132,7 +133,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { artist_name, email, content, youtube_url, spotify_url, payment_id, submission_type } = req.body;
+    const { artist_name, email, title, content, youtube_url, spotify_url, payment_id, submission_type } = req.body;
 
     try {
       // Validate that either content or document is provided
@@ -186,16 +187,17 @@ router.post(
 
       // Save submission to database
       const result = await pool.query(
-        `INSERT INTO music_submissions (artist_name, email, content, youtube_url, spotify_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-         RETURNING id, artist_name, email, submission_type, created_at`,
-        [artist_name, email, content || null, youtube_url || null, spotify_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
+        `INSERT INTO music_submissions (artist_name, email, title, content, youtube_url, spotify_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         RETURNING id, artist_name, email, title, submission_type, created_at`,
+        [artist_name, email, title, content || null, youtube_url || null, spotify_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
       );
 
       // Send email notifications (don't wait for them, send async)
       sendOwnerNotification({
         artist_name,
         email,
+        title,
         submission_type,
         payment_amount,
         content,
