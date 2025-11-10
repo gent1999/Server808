@@ -59,7 +59,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags, spotify_url, youtube_url, category, image_url } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, category, image_url, is_original } = req.body;
 
     try {
       let imageUrl = image_url || null; // Use provided URL if exists
@@ -88,12 +88,12 @@ router.post(
         }
       }
 
-      // Insert article into database with image_url, spotify_url, youtube_url, and category
+      // Insert article into database with image_url, spotify_url, youtube_url, category, and is_original
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, category)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, created_at, updated_at`,
-        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, category || 'article']
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, category, is_original)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, is_original, created_at, updated_at`,
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, category || 'article', is_original === 'true' || is_original === true || false]
       );
 
       const newArticle = result.rows[0];
@@ -115,7 +115,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles ORDER BY created_at DESC'
     );
 
     res.json({
@@ -134,13 +134,13 @@ router.get("/", async (req, res) => {
 router.get("/featured/article", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
     );
 
     // If no featured article, return the latest one
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
+        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
       );
 
       return res.json({
@@ -167,7 +167,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, created_at, updated_at FROM articles WHERE id = $1',
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles WHERE id = $1',
       [id]
     );
 
@@ -202,7 +202,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags, spotify_url, youtube_url, category } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, category, is_original } = req.body;
 
     try {
       // Check if article exists
@@ -236,6 +236,16 @@ router.put(
         }
       }
 
+      // Parse is_original - DEBUG
+      console.log('Received is_original:', is_original, 'Type:', typeof is_original);
+
+      // Convert is_original to boolean (handles 'true', 'false', true, false)
+      let isOriginalValue = false; // Default to false
+      if (is_original === 'true' || is_original === true) {
+        isOriginalValue = true;
+      }
+      console.log('Parsed isOriginalValue:', isOriginalValue);
+
       // Update article (only update image_url if a new image was uploaded)
       const result = await pool.query(
         `UPDATE articles
@@ -247,11 +257,14 @@ router.put(
              spotify_url = COALESCE($6, spotify_url),
              youtube_url = COALESCE($7, youtube_url),
              category = COALESCE($8, category),
+             is_original = $9,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $9
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, is_featured, created_at, updated_at`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, category || null, id]
+         WHERE id = $10
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, category, is_featured, is_original, created_at, updated_at`,
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, category || null, isOriginalValue, id]
       );
+
+      console.log('Updated is_original to:', result.rows[0].is_original);
 
       res.json({
         message: "Article updated successfully",
