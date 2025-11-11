@@ -7,6 +7,7 @@ import articlesRoutes from "./routes/articles.js";
 import newsletterRoutes from "./routes/newsletter.js";
 import featuredRoutes from "./routes/featured.js";
 import submissionsRoutes from "./routes/submissions.js";
+import spotifyEmbedsRoutes from "./routes/spotifyEmbeds.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -64,6 +65,15 @@ app.use("/api/submissions", (req, res, next) => {
   }
   next();
 }, submissionsRoutes);
+
+// Spotify Embeds routes (public GET, protected POST/PUT/DELETE)
+app.use("/api/spotify-embeds", (req, res, next) => {
+  // Apply auth middleware to POST, PUT, DELETE, and /all route
+  if (req.method === 'POST' || req.method === 'PUT' || req.method === 'DELETE' || req.path === '/all') {
+    return authMiddleware(req, res, next);
+  }
+  next();
+}, spotifyEmbedsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
