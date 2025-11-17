@@ -9,10 +9,22 @@ let analyticsDataClient;
 let initError = null;
 
 try {
-  // Check if we have JSON credentials in environment variable (for Vercel/production)
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+  // Check if we have base64 encoded credentials (preferred for Vercel)
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64) {
+    console.log("🔍 Decoding GOOGLE_SERVICE_ACCOUNT_KEY_BASE64...");
+    const decoded = Buffer.from(process.env.GOOGLE_SERVICE_ACCOUNT_KEY_BASE64, 'base64').toString('utf8');
+    const credentials = JSON.parse(decoded);
+    console.log("✅ Credentials decoded and parsed successfully");
+    console.log("📧 Service account email:", credentials.client_email);
+
+    analyticsDataClient = new BetaAnalyticsDataClient({
+      credentials: credentials,
+    });
+    console.log("✅ Google Analytics initialized with base64 credentials");
+  }
+  // Check if we have JSON credentials in environment variable
+  else if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
     console.log("🔍 Attempting to parse GOOGLE_SERVICE_ACCOUNT_KEY...");
-    // Parse the JSON credentials from environment variable
     const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
     console.log("✅ Credentials parsed successfully");
     console.log("📧 Service account email:", credentials.client_email);
