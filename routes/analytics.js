@@ -8,11 +8,23 @@ const router = express.Router();
 let analyticsDataClient;
 
 try {
-  // Service account credentials will be loaded from environment variable
-  // or from the default path (GOOGLE_APPLICATION_CREDENTIALS)
-  analyticsDataClient = new BetaAnalyticsDataClient();
+  // Check if we have JSON credentials in environment variable (for Vercel/production)
+  if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    // Parse the JSON credentials from environment variable
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+    analyticsDataClient = new BetaAnalyticsDataClient({
+      credentials: credentials,
+    });
+    console.log("✅ Google Analytics initialized with GOOGLE_SERVICE_ACCOUNT_KEY");
+  }
+  // Fall back to file path (GOOGLE_APPLICATION_CREDENTIALS for local development)
+  else {
+    // This will use the GOOGLE_APPLICATION_CREDENTIALS env var or default file
+    analyticsDataClient = new BetaAnalyticsDataClient();
+    console.log("✅ Google Analytics initialized with credentials file");
+  }
 } catch (error) {
-  console.warn("Google Analytics client not initialized:", error.message);
+  console.warn("⚠️ Google Analytics client not initialized:", error.message);
 }
 
 // @route   GET /api/analytics/visitors

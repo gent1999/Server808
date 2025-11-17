@@ -7,9 +7,19 @@ async function testAnalytics() {
   try {
     console.log('Testing Google Analytics connection...');
     console.log('Property ID:', process.env.GA_PROPERTY_ID);
-    console.log('Credentials file:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
-    const analyticsDataClient = new BetaAnalyticsDataClient();
+    let analyticsDataClient;
+
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+      console.log('Using GOOGLE_SERVICE_ACCOUNT_KEY from environment');
+      const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+      analyticsDataClient = new BetaAnalyticsDataClient({
+        credentials: credentials,
+      });
+    } else {
+      console.log('Using default credentials');
+      analyticsDataClient = new BetaAnalyticsDataClient();
+    }
 
     const [response] = await analyticsDataClient.runReport({
       property: `properties/${process.env.GA_PROPERTY_ID}`,
