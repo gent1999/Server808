@@ -27,6 +27,19 @@ try {
   console.warn("⚠️ Google Analytics client not initialized:", error.message);
 }
 
+// @route   GET /api/analytics/debug
+// @desc    Debug analytics configuration
+// @access  Public (temporary for debugging)
+router.get("/debug", async (req, res) => {
+  res.json({
+    hasServiceAccountKey: !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
+    hasApplicationCredentials: !!process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    hasPropertyId: !!process.env.GA_PROPERTY_ID,
+    propertyId: process.env.GA_PROPERTY_ID,
+    clientInitialized: !!analyticsDataClient,
+  });
+});
+
 // @route   GET /api/analytics/visitors
 // @desc    Get monthly visitor stats from Google Analytics
 // @access  Private (Admin only)
