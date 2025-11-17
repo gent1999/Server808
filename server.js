@@ -9,6 +9,7 @@ import featuredRoutes from "./routes/featured.js";
 import submissionsRoutes from "./routes/submissions.js";
 import spotifyEmbedsRoutes from "./routes/spotifyEmbeds.js";
 import settingsRoutes from "./routes/settings.js";
+import analyticsRoutes from "./routes/analytics.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -79,6 +80,9 @@ app.use("/api/spotify-embeds", (req, res, next) => {
 // Settings routes (public GET /public, protected admin routes)
 app.use("/api/admin/settings", authMiddleware, settingsRoutes);
 app.use("/api/settings", settingsRoutes);
+
+// Analytics routes (protected - admin only)
+app.use("/api/analytics", authMiddleware, analyticsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
