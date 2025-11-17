@@ -10,6 +10,7 @@ import submissionsRoutes from "./routes/submissions.js";
 import spotifyEmbedsRoutes from "./routes/spotifyEmbeds.js";
 import settingsRoutes from "./routes/settings.js";
 import analyticsRoutes from "./routes/analytics.js";
+import amazonProductsRoutes from "./routes/amazonProducts.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -83,6 +84,19 @@ app.use("/api/settings", settingsRoutes);
 
 // Analytics routes (protected - admin only)
 app.use("/api/analytics", authMiddleware, analyticsRoutes);
+
+// Amazon Products routes (public GET, protected admin routes)
+app.use("/api/amazon-products", (req, res, next) => {
+  // Public route for getting active products
+  if (req.method === 'GET' && req.path === '/') {
+    return next();
+  }
+  // All admin routes require auth
+  if (req.path.startsWith('/admin')) {
+    return authMiddleware(req, res, next);
+  }
+  next();
+}, amazonProductsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
