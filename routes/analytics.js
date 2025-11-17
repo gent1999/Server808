@@ -6,12 +6,17 @@ const router = express.Router();
 
 // Initialize the GA4 client
 let analyticsDataClient;
+let initError = null;
 
 try {
   // Check if we have JSON credentials in environment variable (for Vercel/production)
   if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    console.log("🔍 Attempting to parse GOOGLE_SERVICE_ACCOUNT_KEY...");
     // Parse the JSON credentials from environment variable
     const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
+    console.log("✅ Credentials parsed successfully");
+    console.log("📧 Service account email:", credentials.client_email);
+
     analyticsDataClient = new BetaAnalyticsDataClient({
       credentials: credentials,
     });
@@ -19,12 +24,16 @@ try {
   }
   // Fall back to file path (GOOGLE_APPLICATION_CREDENTIALS for local development)
   else {
+    console.log("🔍 Using GOOGLE_APPLICATION_CREDENTIALS file path");
     // This will use the GOOGLE_APPLICATION_CREDENTIALS env var or default file
     analyticsDataClient = new BetaAnalyticsDataClient();
     console.log("✅ Google Analytics initialized with credentials file");
   }
 } catch (error) {
-  console.warn("⚠️ Google Analytics client not initialized:", error.message);
+  initError = error.message;
+  console.error("❌ Google Analytics client initialization failed:");
+  console.error("Error:", error.message);
+  console.error("Stack:", error.stack);
 }
 
 // @route   GET /api/analytics/debug
@@ -47,7 +56,10 @@ router.get("/visitors", auth, async (req, res) => {
   try {
     if (!analyticsDataClient) {
       return res.status(503).json({
-        message: "Google Analytics not configured",
+        message: initError ? `Analytics initialization failed: ${initError}` : "Google Analytics not configured",
+        error: initError,
+        hasEnvVar: !!process.env.GOOGLE_SERVICE_ACCOUNT_KEY,
+        hasPropertyId: !!process.env.GA_PROPERTY_ID,
         visitors: {
           current: 0,
           previous: 0,
