@@ -61,7 +61,25 @@ router.get("/", async (req, res) => {
   }
 });
 
-// @route   GET /api/admin/amazon-products
+// @route   GET /api/amazon-products/mobile-featured
+// @desc    Get mobile featured Amazon product (public)
+// @access  Public
+router.get("/mobile-featured", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM amazon_products WHERE is_mobile_featured = true AND is_active = true LIMIT 1"
+    );
+
+    res.json({
+      product: result.rows[0] || null
+    });
+  } catch (error) {
+    console.error("Error fetching mobile featured Amazon product:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// @route   GET /api/amazon-products/admin
 // @desc    Get all Amazon products (admin)
 // @access  Private
 router.get("/admin", auth, async (req, res) => {
@@ -85,7 +103,7 @@ router.get("/admin", auth, async (req, res) => {
 // @access  Private
 router.post("/admin", auth, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, affiliate_link, is_active, display_order } = req.body;
+    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured } = req.body;
 
     if (!name || !affiliate_link) {
       return res.status(400).json({ message: "Name and affiliate link are required" });
@@ -105,11 +123,18 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
       }
     }
 
+    const isMobileFeatured = is_mobile_featured === true || is_mobile_featured === 'true';
+
+    // If setting this as mobile featured, unset all others
+    if (isMobileFeatured) {
+      await pool.query("UPDATE amazon_products SET is_mobile_featured = false");
+    }
+
     const result = await pool.query(
-      `INSERT INTO amazon_products (name, description, affiliate_link, image_url, is_active, display_order)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO amazon_products (name, description, affiliate_link, image_url, is_active, display_order, is_mobile_featured)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [name, description, affiliate_link, imageUrl, is_active !== false && is_active !== 'false', parseInt(display_order) || 0]
+      [name, description, affiliate_link, imageUrl, is_active !== false && is_active !== 'false', parseInt(display_order) || 0, isMobileFeatured]
     );
 
     res.status(201).json({
@@ -128,7 +153,7 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
 router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, affiliate_link, is_active, display_order } = req.body;
+    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured } = req.body;
 
     // Check if product exists
     const checkResult = await pool.query(
@@ -154,14 +179,21 @@ router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
       }
     }
 
+    const isMobileFeatured = is_mobile_featured === true || is_mobile_featured === 'true';
+
+    // If setting this as mobile featured, unset all others
+    if (isMobileFeatured) {
+      await pool.query("UPDATE amazon_products SET is_mobile_featured = false WHERE id != $1", [id]);
+    }
+
     const result = await pool.query(
       `UPDATE amazon_products
        SET name = $1, description = $2, affiliate_link = $3,
            image_url = COALESCE($4, image_url),
-           is_active = $5, display_order = $6, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $7
+           is_active = $5, display_order = $6, is_mobile_featured = $7, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $8
        RETURNING *`,
-      [name, description, affiliate_link, imageUrl, is_active, parseInt(display_order), id]
+      [name, description, affiliate_link, imageUrl, is_active, parseInt(display_order), isMobileFeatured, id]
     );
 
     res.json({
