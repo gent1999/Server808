@@ -133,7 +133,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { artist_name, email, title, content, youtube_url, spotify_url, payment_id, submission_type } = req.body;
+    const { artist_name, email, title, content, youtube_url, spotify_url, soundcloud_url, payment_id, submission_type } = req.body;
 
     try {
       // Validate that either content or document is provided
@@ -187,10 +187,10 @@ router.post(
 
       // Save submission to database
       const result = await pool.query(
-        `INSERT INTO music_submissions (artist_name, email, title, content, youtube_url, spotify_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO music_submissions (artist_name, email, title, content, youtube_url, spotify_url, soundcloud_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING id, artist_name, email, title, submission_type, created_at`,
-        [artist_name, email, title, content || null, youtube_url || null, spotify_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
+        [artist_name, email, title, content || null, youtube_url || null, spotify_url || null, soundcloud_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
       );
 
       // Send email notifications (don't wait for them, send async)
@@ -203,6 +203,7 @@ router.post(
         content,
         youtube_url,
         spotify_url,
+        soundcloud_url,
         image_url: imageUrl,
         document_url: documentUrl,
       }).catch(err => console.error('Error sending owner notification:', err));
@@ -270,8 +271,8 @@ router.post("/:id/publish", async (req, res) => {
 
     // Create article from submission
     const articleResult = await pool.query(
-      `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, category, is_featured)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, soundcloud_url, category, is_featured)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id, title, author, created_at`,
       [
         submission.title,
@@ -280,6 +281,7 @@ router.post("/:id/publish", async (req, res) => {
         submission.image_url,
         submission.youtube_url,
         submission.spotify_url,
+        submission.soundcloud_url,
         'article',
         submission.submission_type === 'featured'
       ]
