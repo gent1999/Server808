@@ -74,7 +74,7 @@ router.put("/", auth, async (req, res) => {
 router.get("/public", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT key, value FROM settings WHERE key IN ('adsterra_enabled', 'hilltop_enabled', 'monetag_enabled')"
+      "SELECT key, value FROM settings WHERE key IN ('adsterra_enabled', 'hilltop_enabled', 'monetag_enabled', 'beatport_banner_enabled', 'beatport_banner_url', 'beatport_banner_image_url')"
     );
 
     // Convert rows to object format
