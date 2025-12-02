@@ -62,6 +62,8 @@ router.get("/visitors", auth, async (req, res) => {
         visitors: {
           current: 0,
           previous: 0,
+          allTime: 0,
+          average: 0,
           change: 0,
           realtime: 0
         }
@@ -76,6 +78,8 @@ router.get("/visitors", auth, async (req, res) => {
         visitors: {
           current: 0,
           previous: 0,
+          allTime: 0,
+          average: 0,
           change: 0,
           realtime: 0
         }
@@ -119,6 +123,37 @@ router.get("/visitors", auth, async (req, res) => {
       ],
     });
 
+    // Get all-time visitors
+    const [allTimeResponse] = await analyticsDataClient.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [
+        {
+          startDate: "2020-01-01", // Start from a reasonable date in the past
+          endDate: "today",
+        },
+      ],
+      metrics: [
+        { name: "activeUsers" },
+      ],
+    });
+
+    // Get monthly breakdown for average calculation
+    const [monthlyResponse] = await analyticsDataClient.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [
+        {
+          startDate: "2020-01-01",
+          endDate: "today",
+        },
+      ],
+      dimensions: [
+        { name: "yearMonth" }, // Format: YYYYMM
+      ],
+      metrics: [
+        { name: "activeUsers" },
+      ],
+    });
+
     // Get realtime active users
     const [realtimeResponse] = await analyticsDataClient.runRealtimeReport({
       property: `properties/${propertyId}`,
@@ -129,7 +164,17 @@ router.get("/visitors", auth, async (req, res) => {
 
     const currentMonthVisitors = parseInt(currentMonthResponse.rows?.[0]?.metricValues?.[0]?.value || 0);
     const previousMonthVisitors = parseInt(previousMonthResponse.rows?.[0]?.metricValues?.[0]?.value || 0);
+    const allTimeVisitors = parseInt(allTimeResponse.rows?.[0]?.metricValues?.[0]?.value || 0);
     const realtimeVisitors = parseInt(realtimeResponse.rows?.[0]?.metricValues?.[0]?.value || 0);
+
+    // Calculate average monthly visitors
+    let averageMonthly = 0;
+    if (monthlyResponse.rows && monthlyResponse.rows.length > 0) {
+      const totalVisitors = monthlyResponse.rows.reduce((sum, row) => {
+        return sum + parseInt(row.metricValues[0].value || 0);
+      }, 0);
+      averageMonthly = Math.round(totalVisitors / monthlyResponse.rows.length);
+    }
 
     // Calculate percentage change
     let change = 0;
@@ -141,6 +186,8 @@ router.get("/visitors", auth, async (req, res) => {
       visitors: {
         current: currentMonthVisitors,
         previous: previousMonthVisitors,
+        allTime: allTimeVisitors,
+        average: averageMonthly,
         change: Math.round(change * 10) / 10, // Round to 1 decimal
         realtime: realtimeVisitors
       }
@@ -153,6 +200,8 @@ router.get("/visitors", auth, async (req, res) => {
       visitors: {
         current: 0,
         previous: 0,
+        allTime: 0,
+        average: 0,
         change: 0,
         realtime: 0
       }
