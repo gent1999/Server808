@@ -6,9 +6,19 @@ const router = express.Router();
 // GET all active Spotify embeds (public)
 router.get('/', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM spotify_embeds WHERE is_active = true ORDER BY display_order ASC, created_at DESC'
-    );
+    const { page_type } = req.query;
+
+    let query = 'SELECT * FROM spotify_embeds WHERE is_active = true';
+    const params = [];
+
+    if (page_type) {
+      query += ' AND page_type = $1';
+      params.push(page_type);
+    }
+
+    query += ' ORDER BY display_order ASC, created_at DESC';
+
+    const result = await pool.query(query, params);
     res.json({ embeds: result.rows });
   } catch (error) {
     console.error('Error fetching Spotify embeds:', error);
@@ -76,7 +86,7 @@ const parseSpotifyUrl = (url) => {
 // POST create new Spotify embed (protected)
 router.post('/', async (req, res) => {
   try {
-    const { spotify_url } = req.body;
+    const { spotify_url, page_type = 'home' } = req.body;
 
     if (!spotify_url) {
       return res.status(400).json({ message: 'Spotify URL is required' });
@@ -93,10 +103,10 @@ router.post('/', async (req, res) => {
     const nextOrder = orderResult.rows[0].next_order;
 
     const result = await pool.query(
-      `INSERT INTO spotify_embeds (title, spotify_url, embed_type, is_active, display_order)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO spotify_embeds (title, spotify_url, embed_type, is_active, display_order, page_type)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [title, embedUrl, type, true, nextOrder]
+      [title, embedUrl, type, true, nextOrder, page_type]
     );
 
     res.status(201).json({
