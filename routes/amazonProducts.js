@@ -43,13 +43,25 @@ const uploadToCloudinary = (buffer, folder = 'amazon_images') => {
 };
 
 // @route   GET /api/amazon-products
-// @desc    Get all active Amazon products (public)
+// @desc    Get all active Amazon products (public), optionally filtered by page
 // @access  Public
 router.get("/", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM amazon_products WHERE is_active = true ORDER BY display_order ASC, created_at DESC"
-    );
+    const { page } = req.query; // 'home' or 'article'
+
+    let query = "SELECT * FROM amazon_products WHERE is_active = true";
+    const params = [];
+
+    // Filter by page if specified
+    if (page === 'home') {
+      query += " AND show_on_home = true";
+    } else if (page === 'article') {
+      query += " AND show_on_article = true";
+    }
+
+    query += " ORDER BY display_order ASC, created_at DESC";
+
+    const result = await pool.query(query, params);
 
     res.json({
       products: result.rows,
@@ -103,7 +115,7 @@ router.get("/admin", auth, async (req, res) => {
 // @access  Private
 router.post("/admin", auth, upload.single('image'), async (req, res) => {
   try {
-    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured } = req.body;
+    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured, show_on_home, show_on_article } = req.body;
 
     if (!name || !affiliate_link) {
       return res.status(400).json({ message: "Name and affiliate link are required" });
@@ -124,6 +136,8 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
     }
 
     const isMobileFeatured = is_mobile_featured === true || is_mobile_featured === 'true';
+    const showOnHome = show_on_home !== false && show_on_home !== 'false';
+    const showOnArticle = show_on_article !== false && show_on_article !== 'false';
 
     // If setting this as mobile featured, unset all others
     if (isMobileFeatured) {
@@ -131,10 +145,10 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
     }
 
     const result = await pool.query(
-      `INSERT INTO amazon_products (name, description, affiliate_link, image_url, is_active, display_order, is_mobile_featured)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO amazon_products (name, description, affiliate_link, image_url, is_active, display_order, is_mobile_featured, show_on_home, show_on_article)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [name, description, affiliate_link, imageUrl, is_active !== false && is_active !== 'false', parseInt(display_order) || 0, isMobileFeatured]
+      [name, description, affiliate_link, imageUrl, is_active !== false && is_active !== 'false', parseInt(display_order) || 0, isMobileFeatured, showOnHome, showOnArticle]
     );
 
     res.status(201).json({
@@ -153,7 +167,7 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
 router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured } = req.body;
+    const { name, description, affiliate_link, is_active, display_order, is_mobile_featured, show_on_home, show_on_article } = req.body;
 
     // Check if product exists
     const checkResult = await pool.query(
@@ -180,6 +194,8 @@ router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
     }
 
     const isMobileFeatured = is_mobile_featured === true || is_mobile_featured === 'true';
+    const showOnHome = show_on_home !== false && show_on_home !== 'false';
+    const showOnArticle = show_on_article !== false && show_on_article !== 'false';
 
     // If setting this as mobile featured, unset all others
     if (isMobileFeatured) {
@@ -190,10 +206,11 @@ router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
       `UPDATE amazon_products
        SET name = $1, description = $2, affiliate_link = $3,
            image_url = COALESCE($4, image_url),
-           is_active = $5, display_order = $6, is_mobile_featured = $7, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $8
+           is_active = $5, display_order = $6, is_mobile_featured = $7,
+           show_on_home = $8, show_on_article = $9, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $10
        RETURNING *`,
-      [name, description, affiliate_link, imageUrl, is_active, parseInt(display_order), isMobileFeatured, id]
+      [name, description, affiliate_link, imageUrl, is_active, parseInt(display_order), isMobileFeatured, showOnHome, showOnArticle, id]
     );
 
     res.json({
