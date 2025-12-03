@@ -209,6 +209,93 @@ router.get("/visitors", auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/analytics/article/:slug
+// @desc    Get analytics for a specific article
+// @access  Private (Admin only)
+router.get("/article/:slug", auth, async (req, res) => {
+  try {
+    if (!analyticsDataClient) {
+      return res.status(503).json({
+        message: "Google Analytics not configured",
+        analytics: {
+          pageViews: 0,
+          uniqueVisitors: 0,
+          avgTimeOnPage: 0,
+          bounceRate: 0,
+        }
+      });
+    }
+
+    const propertyId = process.env.GA_PROPERTY_ID;
+    if (!propertyId) {
+      return res.status(503).json({
+        message: "GA_PROPERTY_ID not configured",
+        analytics: {
+          pageViews: 0,
+          uniqueVisitors: 0,
+          avgTimeOnPage: 0,
+          bounceRate: 0,
+        }
+      });
+    }
+
+    const { slug } = req.params;
+    const pagePath = `/article/${slug}`;
+
+    // Get analytics for the last 28 days for this specific page
+    const [response] = await analyticsDataClient.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [
+        {
+          startDate: "28daysAgo",
+          endDate: "today",
+        },
+      ],
+      dimensions: [
+        { name: "pagePath" },
+      ],
+      dimensionFilter: {
+        filter: {
+          fieldName: "pagePath",
+          stringFilter: {
+            matchType: "CONTAINS",
+            value: slug,
+          },
+        },
+      },
+      metrics: [
+        { name: "screenPageViews" },
+        { name: "activeUsers" },
+        { name: "averageSessionDuration" },
+        { name: "bounceRate" },
+      ],
+    });
+
+    const data = response.rows?.[0]?.metricValues || [];
+
+    res.json({
+      analytics: {
+        pageViews: parseInt(data[0]?.value || 0),
+        uniqueVisitors: parseInt(data[1]?.value || 0),
+        avgTimeOnPage: Math.round(parseFloat(data[2]?.value || 0)),
+        bounceRate: Math.round(parseFloat(data[3]?.value || 0) * 100),
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching article analytics:", error);
+    res.status(500).json({
+      message: "Error fetching article analytics",
+      error: error.message,
+      analytics: {
+        pageViews: 0,
+        uniqueVisitors: 0,
+        avgTimeOnPage: 0,
+        bounceRate: 0,
+      }
+    });
+  }
+});
+
 // Helper function to format date as YYYY-MM-DD
 function formatDate(date) {
   const year = date.getFullYear();

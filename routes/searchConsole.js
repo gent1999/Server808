@@ -273,6 +273,116 @@ router.get("/index-status", auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/search-console/article/:slug
+// @desc    Get Search Console data for a specific article
+// @access  Private (Admin only)
+router.get("/article/:slug", auth, async (req, res) => {
+  try {
+    if (!searchConsole) {
+      return res.status(503).json({
+        message: "Google Search Console not configured",
+        seo: {
+          clicks: 0,
+          impressions: 0,
+          ctr: 0,
+          position: 0,
+          topQueries: []
+        }
+      });
+    }
+
+    const siteUrl = process.env.GSC_SITE_URL;
+    if (!siteUrl) {
+      return res.status(503).json({
+        message: "GSC_SITE_URL not configured",
+        seo: {
+          clicks: 0,
+          impressions: 0,
+          ctr: 0,
+          position: 0,
+          topQueries: []
+        }
+      });
+    }
+
+    const { slug } = req.params;
+
+    // Get last 28 days
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - 28);
+
+    // Get overall stats for this page
+    const pageResponse = await searchConsole.searchanalytics.query({
+      siteUrl: siteUrl,
+      requestBody: {
+        startDate: formatDate(startDate),
+        endDate: formatDate(endDate),
+        dimensionFilterGroups: [{
+          filters: [{
+            dimension: 'page',
+            operator: 'contains',
+            expression: slug
+          }]
+        }],
+        dimensions: [],
+        rowLimit: 1,
+      },
+    });
+
+    const pageData = pageResponse.data.rows?.[0] || {};
+
+    // Get top queries for this page
+    const queriesResponse = await searchConsole.searchanalytics.query({
+      siteUrl: siteUrl,
+      requestBody: {
+        startDate: formatDate(startDate),
+        endDate: formatDate(endDate),
+        dimensionFilterGroups: [{
+          filters: [{
+            dimension: 'page',
+            operator: 'contains',
+            expression: slug
+          }]
+        }],
+        dimensions: ['query'],
+        rowLimit: 5,
+      },
+    });
+
+    const topQueries = (queriesResponse.data.rows || []).map(row => ({
+      query: row.keys[0],
+      clicks: Math.round(row.clicks || 0),
+      impressions: Math.round(row.impressions || 0),
+      ctr: Math.round((row.ctr || 0) * 1000) / 10,
+      position: Math.round((row.position || 0) * 10) / 10,
+    }));
+
+    res.json({
+      seo: {
+        clicks: Math.round(pageData.clicks || 0),
+        impressions: Math.round(pageData.impressions || 0),
+        ctr: Math.round((pageData.ctr || 0) * 1000) / 10,
+        position: Math.round((pageData.position || 0) * 10) / 10,
+        topQueries
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching article Search Console data:", error);
+    res.status(500).json({
+      message: "Error fetching article SEO data",
+      error: error.message,
+      seo: {
+        clicks: 0,
+        impressions: 0,
+        ctr: 0,
+        position: 0,
+        topQueries: []
+      }
+    });
+  }
+});
+
 // Helper function to format date as YYYY-MM-DD
 function formatDate(date) {
   const year = date.getFullYear();
