@@ -10,6 +10,7 @@ import submissionsRoutes from "./routes/submissions.js";
 import spotifyEmbedsRoutes from "./routes/spotifyEmbeds.js";
 import settingsRoutes from "./routes/settings.js";
 import analyticsRoutes from "./routes/analytics.js";
+import searchConsoleRoutes from "./routes/searchConsole.js";
 import amazonProductsRoutes from "./routes/amazonProducts.js";
 import authMiddleware from "./middleware/auth.js";
 
@@ -84,6 +85,9 @@ app.use("/api/settings", settingsRoutes);
 
 // Analytics routes (protected - admin only)
 app.use("/api/analytics", authMiddleware, analyticsRoutes);
+
+// Search Console routes (protected - admin only)
+app.use("/api/search-console", authMiddleware, searchConsoleRoutes);
 
 // Amazon Products routes (public GET, protected admin routes)
 app.use("/api/amazon-products", (req, res, next) => {
