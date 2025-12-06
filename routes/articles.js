@@ -4,6 +4,7 @@ import pool from "../config/db.js";
 import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { Readable } from "stream";
+import auth from "../middleware/auth.js";
 
 const router = express.Router();
 
@@ -47,6 +48,7 @@ const uploadToCloudinary = (buffer, folder = 'rap-blog') => {
 // @access  Private (requires admin authentication)
 router.post(
   "/",
+  auth, // Add authentication middleware
   upload.single('image'), // Handle single image upload
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
@@ -59,7 +61,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, category, image_url, is_original } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, category, image_url, is_original, is_evergreen } = req.body;
 
     try {
       let imageUrl = image_url || null; // Use provided URL if exists
@@ -88,12 +90,12 @@ router.post(
         }
       }
 
-      // Insert article into database with image_url, spotify_url, youtube_url, soundcloud_url, category, and is_original
+      // Insert article into database with image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, and is_evergreen
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, created_at, updated_at`,
-        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || 'article', is_original === 'true' || is_original === true || false]
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen, created_at, updated_at`,
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false]
       );
 
       const newArticle = result.rows[0];
@@ -115,7 +117,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles ORDER BY created_at DESC'
     );
 
     res.json({
@@ -134,13 +136,13 @@ router.get("/", async (req, res) => {
 router.get("/featured/article", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
     );
 
     // If no featured article, return the latest one
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
+        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
       );
 
       return res.json({
@@ -167,7 +169,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, created_at, updated_at FROM articles WHERE id = $1',
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles WHERE id = $1',
       [id]
     );
 
@@ -189,6 +191,7 @@ router.get("/:id", async (req, res) => {
 // @access  Private (requires admin authentication)
 router.put(
   "/:id",
+  auth, // Add authentication middleware
   upload.single('image'), // Handle single image upload
   [
     body("title").optional().trim().notEmpty().withMessage("Title cannot be empty"),
@@ -202,7 +205,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, category, is_original } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen } = req.body;
 
     try {
       // Check if article exists
@@ -246,6 +249,12 @@ router.put(
       }
       console.log('Parsed isOriginalValue:', isOriginalValue);
 
+      // Convert is_evergreen to boolean
+      let isEvergreenValue = false; // Default to false
+      if (is_evergreen === 'true' || is_evergreen === true) {
+        isEvergreenValue = true;
+      }
+
       // Update article (only update image_url if a new image was uploaded)
       const result = await pool.query(
         `UPDATE articles
@@ -259,10 +268,11 @@ router.put(
              soundcloud_url = COALESCE($8, soundcloud_url),
              category = COALESCE($9, category),
              is_original = $10,
+             is_evergreen = $11,
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $11
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_featured, is_original, created_at, updated_at`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || null, isOriginalValue, id]
+         WHERE id = $12
+         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_featured, is_original, is_evergreen, created_at, updated_at`,
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || null, isOriginalValue, isEvergreenValue, id]
       );
 
       console.log('Updated is_original to:', result.rows[0].is_original);
@@ -281,7 +291,7 @@ router.put(
 // @route   DELETE /api/articles/:id
 // @desc    Delete an article
 // @access  Private (requires admin authentication)
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
 
