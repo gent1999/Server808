@@ -5,6 +5,7 @@ import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { Readable } from "stream";
 import auth from "../middleware/auth.js";
+import { pingSitemap, requestIndexing } from "../utils/sitemapPing.js";
 
 const router = express.Router();
 
@@ -99,6 +100,9 @@ router.post(
       );
 
       const newArticle = result.rows[0];
+
+      // Notify search engines about the new article
+      pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
       res.status(201).json({
         message: "Article created successfully",
@@ -277,6 +281,9 @@ router.put(
 
       console.log('Updated is_original to:', result.rows[0].is_original);
 
+      // Notify search engines about the updated article
+      pingSitemap().catch(err => console.error('Sitemap ping error:', err));
+
       res.json({
         message: "Article updated successfully",
         article: result.rows[0]
@@ -303,6 +310,9 @@ router.delete("/:id", auth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ message: "Article not found" });
     }
+
+    // Notify search engines about the deleted article
+    pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
     res.json({
       message: "Article deleted successfully",

@@ -25,6 +25,7 @@
     "googleapis": "^166.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "node-fetch": "^3.3.2",
     "nodemailer": "^6.9.16",
     "pg": "^8.16.3",
     "stripe": "^17.5.0"
