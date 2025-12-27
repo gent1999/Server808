@@ -302,14 +302,46 @@ router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
 
+    // First, get the article to retrieve the image URL
+    const getResult = await pool.query(
+      'SELECT * FROM articles WHERE id = $1',
+      [id]
+    );
+
+    if (getResult.rows.length === 0) {
+      return res.status(404).json({ message: "Article not found" });
+    }
+
+    const article = getResult.rows[0];
+
+    // Delete image from Cloudinary if it exists
+    if (article.image_url && article.image_url.includes('cloudinary.com')) {
+      try {
+        // Extract public_id from Cloudinary URL
+        // URL format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
+        const urlParts = article.image_url.split('/');
+        const uploadIndex = urlParts.indexOf('upload');
+
+        if (uploadIndex !== -1 && uploadIndex + 2 < urlParts.length) {
+          // Get everything after 'upload/v{version}/' and remove file extension
+          const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
+          const publicId = publicIdWithFolder.split('.')[0]; // Remove .jpg, .png, etc.
+
+          console.log('Deleting image from Cloudinary:', publicId);
+          await cloudinary.uploader.destroy(publicId);
+          console.log('Image deleted successfully from Cloudinary');
+        }
+      } catch (cloudinaryError) {
+        console.error('Error deleting image from Cloudinary:', cloudinaryError);
+        // Continue with article deletion even if Cloudinary deletion fails
+      }
+    }
+
+    // Delete article from database
     const result = await pool.query(
       'DELETE FROM articles WHERE id = $1 RETURNING *',
       [id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Article not found" });
-    }
 
     // Notify search engines about the deleted article
     pingSitemap().catch(err => console.error('Sitemap ping error:', err));
