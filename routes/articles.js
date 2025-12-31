@@ -14,7 +14,7 @@ const storage = multer.memoryStorage();
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 5 * 1024 * 1024 // 5MB limit per file
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('image/')) {
@@ -24,6 +24,14 @@ const upload = multer({
     }
   }
 });
+
+// Configure upload for multiple images (cover + 3 additional)
+const uploadMultiple = upload.fields([
+  { name: 'image', maxCount: 1 },           // Cover image
+  { name: 'additional_image_1', maxCount: 1 },
+  { name: 'additional_image_2', maxCount: 1 },
+  { name: 'additional_image_3', maxCount: 1 }
+]);
 
 // Helper function to upload buffer to Cloudinary
 const uploadToCloudinary = (buffer, folder = 'rap-blog') => {
@@ -50,7 +58,7 @@ const uploadToCloudinary = (buffer, folder = 'rap-blog') => {
 router.post(
   "/",
   auth, // Add authentication middleware
-  upload.single('image'), // Handle single image upload
+  uploadMultiple, // Handle multiple image uploads
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("author").trim().notEmpty().withMessage("Author is required"),
@@ -66,19 +74,53 @@ router.post(
 
     try {
       let imageUrl = image_url || null; // Use provided URL if exists
+      let additionalImage1 = null;
+      let additionalImage2 = null;
+      let additionalImage3 = null;
 
-      // Upload image to Cloudinary if file is provided (overrides URL)
-      if (req.file) {
+      // Upload cover image to Cloudinary if file is provided (overrides URL)
+      if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.file.buffer);
+          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
           imageUrl = uploadResult.secure_url;
-          console.log('Image uploaded to Cloudinary:', imageUrl);
+          console.log('Cover image uploaded to Cloudinary:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
-          return res.status(500).json({ message: "Failed to upload image" });
+          return res.status(500).json({ message: "Failed to upload cover image" });
         }
       } else if (image_url) {
         console.log('Using provided image URL:', image_url);
+      }
+
+      // Upload additional images to Cloudinary
+      if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_1'][0].buffer);
+          additionalImage1 = uploadResult.secure_url;
+          console.log('Additional image 1 uploaded:', additionalImage1);
+        } catch (uploadError) {
+          console.error('Additional image 1 upload error:', uploadError);
+        }
+      }
+
+      if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_2'][0].buffer);
+          additionalImage2 = uploadResult.secure_url;
+          console.log('Additional image 2 uploaded:', additionalImage2);
+        } catch (uploadError) {
+          console.error('Additional image 2 upload error:', uploadError);
+        }
+      }
+
+      if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_3'][0].buffer);
+          additionalImage3 = uploadResult.secure_url;
+          console.log('Additional image 3 uploaded:', additionalImage3);
+        } catch (uploadError) {
+          console.error('Additional image 3 upload error:', uploadError);
+        }
       }
 
       // Parse tags if it's a string (from FormData)
@@ -91,12 +133,12 @@ router.post(
         }
       }
 
-      // Insert article into database with image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, and is_evergreen
+      // Insert article into database with all images
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen, created_at, updated_at`,
-        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false]
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         RETURNING *`,
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
       );
 
       const newArticle = result.rows[0];
@@ -121,7 +163,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles ORDER BY created_at DESC'
     );
 
     res.json({
@@ -140,13 +182,13 @@ router.get("/", async (req, res) => {
 router.get("/featured/article", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
     );
 
     // If no featured article, return the latest one
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
+        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
       );
 
       return res.json({
@@ -173,7 +215,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, created_at, updated_at FROM articles WHERE id = $1',
+      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1',
       [id]
     );
 
@@ -196,7 +238,7 @@ router.get("/:id", async (req, res) => {
 router.put(
   "/:id",
   auth, // Add authentication middleware
-  upload.single('image'), // Handle single image upload
+  uploadMultiple, // Handle multiple image uploads
   [
     body("title").optional().trim().notEmpty().withMessage("Title cannot be empty"),
     body("author").optional().trim().notEmpty().withMessage("Author cannot be empty"),
@@ -220,16 +262,50 @@ router.put(
       }
 
       let imageUrl = null;
+      let additionalImage1 = null;
+      let additionalImage2 = null;
+      let additionalImage3 = null;
 
-      // Upload new image to Cloudinary if file is provided
-      if (req.file) {
+      // Upload new cover image to Cloudinary if file is provided
+      if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.file.buffer);
+          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
           imageUrl = uploadResult.secure_url;
-          console.log('New image uploaded to Cloudinary:', imageUrl);
+          console.log('New cover image uploaded to Cloudinary:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
-          return res.status(500).json({ message: "Failed to upload image" });
+          return res.status(500).json({ message: "Failed to upload cover image" });
+        }
+      }
+
+      // Upload new additional images if provided
+      if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_1'][0].buffer);
+          additionalImage1 = uploadResult.secure_url;
+          console.log('New additional image 1 uploaded:', additionalImage1);
+        } catch (uploadError) {
+          console.error('Additional image 1 upload error:', uploadError);
+        }
+      }
+
+      if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_2'][0].buffer);
+          additionalImage2 = uploadResult.secure_url;
+          console.log('New additional image 2 uploaded:', additionalImage2);
+        } catch (uploadError) {
+          console.error('Additional image 2 upload error:', uploadError);
+        }
+      }
+
+      if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
+        try {
+          const uploadResult = await uploadToCloudinary(req.files['additional_image_3'][0].buffer);
+          additionalImage3 = uploadResult.secure_url;
+          console.log('New additional image 3 uploaded:', additionalImage3);
+        } catch (uploadError) {
+          console.error('Additional image 3 upload error:', uploadError);
         }
       }
 
@@ -259,7 +335,7 @@ router.put(
         isEvergreenValue = true;
       }
 
-      // Update article (only update image_url if a new image was uploaded)
+      // Update article (only update images if new ones were uploaded)
       const result = await pool.query(
         `UPDATE articles
          SET title = COALESCE($1, title),
@@ -273,10 +349,13 @@ router.put(
              category = COALESCE($9, category),
              is_original = $10,
              is_evergreen = $11,
+             additional_image_1 = COALESCE($12, additional_image_1),
+             additional_image_2 = COALESCE($13, additional_image_2),
+             additional_image_3 = COALESCE($14, additional_image_3),
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $12
-         RETURNING id, title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, category, is_featured, is_original, is_evergreen, created_at, updated_at`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || null, isOriginalValue, isEvergreenValue, id]
+         WHERE id = $15
+         RETURNING *`,
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, category || null, isOriginalValue, isEvergreenValue, additionalImage1, additionalImage2, additionalImage3, id]
       );
 
       console.log('Updated is_original to:', result.rows[0].is_original);
@@ -314,28 +393,36 @@ router.delete("/:id", auth, async (req, res) => {
 
     const article = getResult.rows[0];
 
-    // Delete image from Cloudinary if it exists
-    if (article.image_url && article.image_url.includes('cloudinary.com')) {
-      try {
-        // Extract public_id from Cloudinary URL
-        // URL format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
-        const urlParts = article.image_url.split('/');
-        const uploadIndex = urlParts.indexOf('upload');
+    // Helper function to delete Cloudinary image
+    const deleteCloudinaryImage = async (imageUrl, label) => {
+      if (imageUrl && imageUrl.includes('cloudinary.com')) {
+        try {
+          // Extract public_id from Cloudinary URL
+          // URL format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
+          const urlParts = imageUrl.split('/');
+          const uploadIndex = urlParts.indexOf('upload');
 
-        if (uploadIndex !== -1 && uploadIndex + 2 < urlParts.length) {
-          // Get everything after 'upload/v{version}/' and remove file extension
-          const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-          const publicId = publicIdWithFolder.split('.')[0]; // Remove .jpg, .png, etc.
+          if (uploadIndex !== -1 && uploadIndex + 2 < urlParts.length) {
+            // Get everything after 'upload/v{version}/' and remove file extension
+            const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
+            const publicId = publicIdWithFolder.split('.')[0]; // Remove .jpg, .png, etc.
 
-          console.log('Deleting image from Cloudinary:', publicId);
-          await cloudinary.uploader.destroy(publicId);
-          console.log('Image deleted successfully from Cloudinary');
+            console.log(`Deleting ${label} from Cloudinary:`, publicId);
+            await cloudinary.uploader.destroy(publicId);
+            console.log(`${label} deleted successfully from Cloudinary`);
+          }
+        } catch (cloudinaryError) {
+          console.error(`Error deleting ${label} from Cloudinary:`, cloudinaryError);
+          // Continue with article deletion even if Cloudinary deletion fails
         }
-      } catch (cloudinaryError) {
-        console.error('Error deleting image from Cloudinary:', cloudinaryError);
-        // Continue with article deletion even if Cloudinary deletion fails
       }
-    }
+    };
+
+    // Delete all images from Cloudinary
+    await deleteCloudinaryImage(article.image_url, 'Cover image');
+    await deleteCloudinaryImage(article.additional_image_1, 'Additional image 1');
+    await deleteCloudinaryImage(article.additional_image_2, 'Additional image 2');
+    await deleteCloudinaryImage(article.additional_image_3, 'Additional image 3');
 
     // Delete article from database
     const result = await pool.query(
