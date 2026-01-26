@@ -13,6 +13,7 @@ import analyticsRoutes from "./routes/analytics.js";
 import searchConsoleRoutes from "./routes/searchConsole.js";
 import amazonProductsRoutes from "./routes/amazonProducts.js";
 import sitemapRoutes from "./routes/sitemap.js";
+import overallsRoutes from "./routes/overalls.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -105,6 +106,9 @@ app.use("/api/amazon-products", (req, res, next) => {
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
+
+// Overalls routes (public GET, protected POST/PUT/DELETE)
+app.use("/api/overalls", overallsRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
