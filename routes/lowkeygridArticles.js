@@ -102,12 +102,12 @@ router.get("/admin/:id", auth, async (req, res) => {
   }
 });
 
-// GET /api/lowkeygrid/articles/:id - Get single 'trends' article (public)
+// GET /api/lowkeygrid/articles/:id - Get single article (public - trends from lowkeygrid, or article/interview from any site)
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      "SELECT * FROM articles WHERE id = $1 AND site = 'lowkeygrid' AND category = 'trends'",
+      "SELECT * FROM articles WHERE id = $1 AND (category = 'trends' OR category IN ('article', 'interview'))",
       [id]
     );
 
