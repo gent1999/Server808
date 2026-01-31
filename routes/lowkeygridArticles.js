@@ -69,11 +69,11 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/lowkeygrid/articles/writeups - Get all LowkeyGrid 'article' and 'interview' articles (public)
+// GET /api/lowkeygrid/articles/writeups - Get all 'article' and 'interview' from both sites (public)
 router.get("/writeups", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM articles WHERE site = 'lowkeygrid' AND category IN ('article', 'interview') ORDER BY created_at DESC"
+      "SELECT * FROM articles WHERE category IN ('article', 'interview') ORDER BY created_at DESC"
     );
     res.json(result.rows);
   } catch (error) {
