@@ -43,8 +43,8 @@ const uploadToCloudinary = (buffer, folder = 'lowkeygrid') => {
   });
 };
 
-// GET /api/lowkeygrid/articles - Get all LowkeyGrid articles (public)
-router.get("/", async (req, res) => {
+// GET /api/lowkeygrid/articles/admin/all - Get ALL LowkeyGrid articles (admin only)
+router.get("/admin/all", auth, async (req, res) => {
   try {
     const result = await pool.query(
       "SELECT * FROM articles WHERE site = 'lowkeygrid' ORDER BY created_at DESC"
@@ -56,12 +56,45 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/lowkeygrid/articles/:id - Get single article (public)
-router.get("/:id", async (req, res) => {
+// GET /api/lowkeygrid/articles - Get all LowkeyGrid 'trends' articles (public)
+router.get("/", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM articles WHERE site = 'lowkeygrid' AND category = 'trends' ORDER BY created_at DESC"
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching articles:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/lowkeygrid/articles/admin/:id - Get single article for admin (protected)
+router.get("/admin/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
       "SELECT * FROM articles WHERE id = $1 AND site = 'lowkeygrid'",
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Article not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching article:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/lowkeygrid/articles/:id - Get single 'trends' article (public)
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "SELECT * FROM articles WHERE id = $1 AND site = 'lowkeygrid' AND category = 'trends'",
       [id]
     );
 
@@ -109,12 +142,12 @@ router.post(
         tagsArray = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
       }
 
-      // Insert article with site='lowkeygrid' and category='trends'
+      // Insert article with site='lowkeygrid'
       const result = await pool.query(
         `INSERT INTO articles (title, author, content, image_url, tags, category, site)
-         VALUES ($1, $2, $3, $4, $5, 'trends', 'lowkeygrid')
+         VALUES ($1, $2, $3, $4, $5, $6, 'lowkeygrid')
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray]
+        [title, author, content, imageUrl, tagsArray, category || 'trends']
       );
 
       res.status(201).json(result.rows[0]);
@@ -184,13 +217,13 @@ router.put(
         tagsArray = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
       }
 
-      // Update article (category always stays 'trends')
+      // Update article
       const result = await pool.query(
         `UPDATE articles
-         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6 AND site = 'lowkeygrid'
+         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, category = $6, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7 AND site = 'lowkeygrid'
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, id]
+        [title, author, content, imageUrl, tagsArray, category || 'trends', id]
       );
 
       res.json(result.rows[0]);
@@ -201,12 +234,12 @@ router.put(
   }
 );
 
-// DELETE /api/lowkeygrid/articles/:id - Delete article (protected)
+// DELETE /api/lowkeygrid/articles/:id - Delete any LowkeyGrid article (protected)
 router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get article to delete image from Cloudinary
+    // Get article to delete image from Cloudinary (any category allowed for delete)
     const article = await pool.query(
       "SELECT * FROM articles WHERE id = $1 AND site = 'lowkeygrid'",
       [id]
