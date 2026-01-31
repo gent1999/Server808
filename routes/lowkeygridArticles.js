@@ -69,6 +69,19 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /api/lowkeygrid/articles/writeups - Get all LowkeyGrid 'article' and 'interview' articles (public)
+router.get("/writeups", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM articles WHERE site = 'lowkeygrid' AND category IN ('article', 'interview') ORDER BY created_at DESC"
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching writeups:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // GET /api/lowkeygrid/articles/admin/:id - Get single article for admin (protected)
 router.get("/admin/:id", auth, async (req, res) => {
   try {
