@@ -139,7 +139,7 @@ router.post(
     }
 
     try {
-      const { title, author, content, tags, category } = req.body;
+      const { title, author, content, tags, category, instagram_link } = req.body;
 
       let imageUrl = null;
 
@@ -157,10 +157,10 @@ router.post(
 
       // Insert article with site='lowkeygrid'
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, image_url, tags, category, site)
-         VALUES ($1, $2, $3, $4, $5, $6, 'lowkeygrid')
+        `INSERT INTO articles (title, author, content, image_url, tags, category, site, instagram_link)
+         VALUES ($1, $2, $3, $4, $5, $6, 'lowkeygrid', $7)
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'trends']
+        [title, author, content, imageUrl, tagsArray, category || 'trends', instagram_link || null]
       );
 
       res.status(201).json(result.rows[0]);
@@ -189,7 +189,7 @@ router.put(
 
     try {
       const { id } = req.params;
-      const { title, author, content, tags, category } = req.body;
+      const { title, author, content, tags, category, instagram_link } = req.body;
 
       // Check if article exists and belongs to lowkeygrid
       const existingArticle = await pool.query(
@@ -233,10 +233,10 @@ router.put(
       // Update article
       const result = await pool.query(
         `UPDATE articles
-         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, category = $6, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $7 AND site = 'lowkeygrid'
+         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, category = $6, instagram_link = $7, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $8 AND site = 'lowkeygrid'
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'trends', id]
+        [title, author, content, imageUrl, tagsArray, category || 'trends', instagram_link || null, id]
       );
 
       res.json(result.rows[0]);

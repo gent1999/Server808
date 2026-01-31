@@ -120,7 +120,7 @@ router.post(
     }
 
     try {
-      const { title, content, overall } = req.body;
+      const { title, content, overall, instagram_link } = req.body;
 
       // Check if image was uploaded
       if (!req.file) {
@@ -155,10 +155,10 @@ router.post(
 
       // Insert into database
       const result = await pool.query(
-        `INSERT INTO overalls (title, image_url, content, slug, overall)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO overalls (title, image_url, content, slug, overall, instagram_link)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING *`,
-        [title, imageUrl, content, finalSlug, overall || null]
+        [title, imageUrl, content, finalSlug, overall || null, instagram_link || null]
       );
 
       res.status(201).json(result.rows[0]);
@@ -186,7 +186,7 @@ router.put(
 
     try {
       const { id } = req.params;
-      const { title, content, overall } = req.body;
+      const { title, content, overall, instagram_link } = req.body;
 
       // Check if overall exists
       const existingOverall = await pool.query(
@@ -249,10 +249,10 @@ router.put(
       // Update overall
       const result = await pool.query(
         `UPDATE overalls
-         SET title = $1, image_url = $2, content = $3, slug = $4, overall = $5, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
+         SET title = $1, image_url = $2, content = $3, slug = $4, overall = $5, instagram_link = $6, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $7
          RETURNING *`,
-        [title, imageUrl, content, slug, overall || null, id]
+        [title, imageUrl, content, slug, overall || null, instagram_link || null, id]
       );
 
       res.json(result.rows[0]);
