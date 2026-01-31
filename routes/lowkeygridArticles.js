@@ -109,12 +109,12 @@ router.post(
         tagsArray = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
       }
 
-      // Insert article with site='lowkeygrid'
+      // Insert article with site='lowkeygrid' and category='trends'
       const result = await pool.query(
         `INSERT INTO articles (title, author, content, image_url, tags, category, site)
-         VALUES ($1, $2, $3, $4, $5, $6, 'lowkeygrid')
+         VALUES ($1, $2, $3, $4, $5, 'trends', 'lowkeygrid')
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'article']
+        [title, author, content, imageUrl, tagsArray]
       );
 
       res.status(201).json(result.rows[0]);
@@ -184,13 +184,13 @@ router.put(
         tagsArray = typeof tags === 'string' ? tags.split(',').map(t => t.trim()) : tags;
       }
 
-      // Update article
+      // Update article (category always stays 'trends')
       const result = await pool.query(
         `UPDATE articles
-         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, category = $6, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $7 AND site = 'lowkeygrid'
+         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $6 AND site = 'lowkeygrid'
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'article', id]
+        [title, author, content, imageUrl, tagsArray, id]
       );
 
       res.json(result.rows[0]);

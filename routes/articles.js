@@ -163,7 +163,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles ORDER BY created_at DESC'
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC"
     );
 
     res.json({
@@ -182,13 +182,13 @@ router.get("/", async (req, res) => {
 router.get("/featured/article", async (req, res) => {
   try {
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true LIMIT 1'
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') LIMIT 1"
     );
 
     // If no featured article, return the latest one
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles ORDER BY created_at DESC LIMIT 1'
+        "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 1"
       );
 
       return res.json({
@@ -215,7 +215,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      'SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1',
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1 AND site = 'cry808' AND category IN ('article', 'interview')",
       [id]
     );
 
