@@ -6,14 +6,22 @@ const router = express.Router();
 // GET all active Spotify embeds (public)
 router.get('/', async (req, res) => {
   try {
-    const { page_type } = req.query;
+    const { page_type, site } = req.query;
 
     let query = 'SELECT * FROM spotify_embeds WHERE is_active = true';
     const params = [];
+    let paramCount = 0;
 
     if (page_type) {
-      query += ' AND page_type = $1';
+      paramCount++;
+      query += ` AND page_type = $${paramCount}`;
       params.push(page_type);
+    }
+
+    if (site) {
+      paramCount++;
+      query += ` AND site = $${paramCount}`;
+      params.push(site);
     }
 
     query += ' ORDER BY display_order ASC, created_at DESC';
@@ -29,9 +37,19 @@ router.get('/', async (req, res) => {
 // GET all Spotify embeds (admin - includes inactive)
 router.get('/all', async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM spotify_embeds ORDER BY display_order ASC, created_at DESC'
-    );
+    const { site } = req.query;
+
+    let query = 'SELECT * FROM spotify_embeds';
+    const params = [];
+
+    if (site) {
+      query += ' WHERE site = $1';
+      params.push(site);
+    }
+
+    query += ' ORDER BY display_order ASC, created_at DESC';
+
+    const result = await pool.query(query, params);
     res.json({ embeds: result.rows });
   } catch (error) {
     console.error('Error fetching all Spotify embeds:', error);
@@ -86,7 +104,7 @@ const parseSpotifyUrl = (url) => {
 // POST create new Spotify embed (protected)
 router.post('/', async (req, res) => {
   try {
-    const { spotify_url, page_type = 'home' } = req.body;
+    const { spotify_url, page_type = 'home', site = 'cry808' } = req.body;
 
     if (!spotify_url) {
       return res.status(400).json({ message: 'Spotify URL is required' });
@@ -98,15 +116,18 @@ router.post('/', async (req, res) => {
     // Auto-generate title based on type
     const title = `Spotify ${type.charAt(0).toUpperCase() + type.slice(1)}`;
 
-    // Get the max display_order and add 1
-    const orderResult = await pool.query('SELECT COALESCE(MAX(display_order), -1) + 1 as next_order FROM spotify_embeds');
+    // Get the max display_order for this site and add 1
+    const orderResult = await pool.query(
+      'SELECT COALESCE(MAX(display_order), -1) + 1 as next_order FROM spotify_embeds WHERE site = $1',
+      [site]
+    );
     const nextOrder = orderResult.rows[0].next_order;
 
     const result = await pool.query(
-      `INSERT INTO spotify_embeds (title, spotify_url, embed_type, is_active, display_order, page_type)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO spotify_embeds (title, spotify_url, embed_type, is_active, display_order, page_type, site)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [title, embedUrl, type, true, nextOrder, page_type]
+      [title, embedUrl, type, true, nextOrder, page_type, site]
     );
 
     res.status(201).json({
