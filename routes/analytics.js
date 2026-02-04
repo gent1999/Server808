@@ -70,11 +70,20 @@ router.get("/visitors", auth, async (req, res) => {
       });
     }
 
-    const propertyId = process.env.GA_PROPERTY_ID;
+    // Get site parameter from query (default to cry808)
+    const site = req.query.site || 'cry808';
+
+    // Select the appropriate property ID based on site
+    let propertyId;
+    if (site === '2koveralls' || site === 'lowkeygrid') {
+      propertyId = process.env.GA_PROPERTY_ID_2KOVERALLS;
+    } else {
+      propertyId = process.env.GA_PROPERTY_ID_CRY808 || process.env.GA_PROPERTY_ID;
+    }
 
     if (!propertyId) {
       return res.status(503).json({
-        message: "GA_PROPERTY_ID not configured",
+        message: `GA_PROPERTY_ID not configured for site: ${site}`,
         visitors: {
           current: 0,
           previous: 0,
