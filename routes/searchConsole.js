@@ -38,6 +38,16 @@ try {
   console.error("Error:", error.message);
 }
 
+// Helper to resolve site URL from query param or env var
+function getSiteUrl(req) {
+  const site = req.query.site;
+  if (site === '2koveralls') {
+    return process.env.GSC_SITE_URL_2KOVERALLS || null;
+  }
+  // Default to cry808 / GSC_SITE_URL
+  return process.env.GSC_SITE_URL || null;
+}
+
 // @route   GET /api/search-console/performance
 // @desc    Get overall search performance metrics
 // @access  Private (Admin only)
@@ -56,10 +66,10 @@ router.get("/performance", auth, async (req, res) => {
       });
     }
 
-    const siteUrl = process.env.GSC_SITE_URL;
+    const siteUrl = getSiteUrl(req);
     if (!siteUrl) {
       return res.status(503).json({
-        message: "GSC_SITE_URL not configured in environment variables",
+        message: "GSC site URL not configured for this site",
         performance: {
           clicks: 0,
           impressions: 0,
@@ -121,10 +131,10 @@ router.get("/top-queries", auth, async (req, res) => {
       });
     }
 
-    const siteUrl = process.env.GSC_SITE_URL;
+    const siteUrl = getSiteUrl(req);
     if (!siteUrl) {
       return res.status(503).json({
-        message: "GSC_SITE_URL not configured",
+        message: "GSC site URL not configured for this site",
         queries: []
       });
     }
@@ -175,10 +185,10 @@ router.get("/top-pages", auth, async (req, res) => {
       });
     }
 
-    const siteUrl = process.env.GSC_SITE_URL;
+    const siteUrl = getSiteUrl(req);
     if (!siteUrl) {
       return res.status(503).json({
-        message: "GSC_SITE_URL not configured",
+        message: "GSC site URL not configured for this site",
         pages: []
       });
     }
@@ -234,10 +244,10 @@ router.get("/index-status", auth, async (req, res) => {
       });
     }
 
-    const siteUrl = process.env.GSC_SITE_URL;
+    const siteUrl = getSiteUrl(req);
     if (!siteUrl) {
       return res.status(503).json({
-        message: "GSC_SITE_URL not configured",
+        message: "GSC site URL not configured for this site",
         indexStatus: {
           valid: 0,
           warning: 0,
@@ -291,10 +301,10 @@ router.get("/article/:slug", auth, async (req, res) => {
       });
     }
 
-    const siteUrl = process.env.GSC_SITE_URL;
+    const siteUrl = getSiteUrl(req);
     if (!siteUrl) {
       return res.status(503).json({
-        message: "GSC_SITE_URL not configured",
+        message: "GSC site URL not configured for this site",
         seo: {
           clicks: 0,
           impressions: 0,
