@@ -1,4 +1,4 @@
-// server.js
+// server.js - Updated for multi-site analytics support
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
