@@ -13,6 +13,7 @@ import analyticsRoutes from "./routes/analytics.js";
 import searchConsoleRoutes from "./routes/searchConsole.js";
 import amazonProductsRoutes from "./routes/amazonProducts.js";
 import sitemapRoutes from "./routes/sitemap.js";
+import lowkeygridSitemapRoutes from "./routes/lowkeygridSitemap.js";
 import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
 import authMiddleware from "./middleware/auth.js";
@@ -107,6 +108,7 @@ app.use("/api/amazon-products", (req, res, next) => {
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
+app.use("/", lowkeygridSitemapRoutes);
 
 // Overalls routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/overalls", overallsRoutes);
