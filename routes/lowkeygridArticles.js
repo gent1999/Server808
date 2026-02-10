@@ -126,7 +126,7 @@ router.get("/:id", async (req, res) => {
 router.post(
   "/",
   auth,
-  upload.single('image'),
+  upload.fields([{ name: 'image', maxCount: 1 }, { name: 'thumbnail', maxCount: 1 }]),
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("author").trim().notEmpty().withMessage("Author is required"),
@@ -142,11 +142,18 @@ router.post(
       const { title, author, content, tags, category, instagram_link } = req.body;
 
       let imageUrl = null;
+      let thumbnailUrl = null;
 
-      // Upload image to Cloudinary if provided
-      if (req.file) {
-        const uploadResult = await uploadToCloudinary(req.file.buffer);
+      // Upload original image to Cloudinary if provided
+      if (req.files && req.files['image'] && req.files['image'][0]) {
+        const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
         imageUrl = uploadResult.secure_url;
+      }
+
+      // Upload thumbnail (cropped) to Cloudinary if provided
+      if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
+        const uploadResult = await uploadToCloudinary(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails');
+        thumbnailUrl = uploadResult.secure_url;
       }
 
       // Parse tags if provided as string
@@ -157,10 +164,10 @@ router.post(
 
       // Insert article with site='lowkeygrid'
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, image_url, tags, category, site, instagram_link)
-         VALUES ($1, $2, $3, $4, $5, $6, 'lowkeygrid', $7)
+        `INSERT INTO articles (title, author, content, image_url, thumbnail_url, tags, category, site, instagram_link)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'lowkeygrid', $8)
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'trends', instagram_link || null]
+        [title, author, content, imageUrl, thumbnailUrl, tagsArray, category || 'trends', instagram_link || null]
       );
 
       res.status(201).json(result.rows[0]);
@@ -175,7 +182,7 @@ router.post(
 router.put(
   "/:id",
   auth,
-  upload.single('image'),
+  upload.fields([{ name: 'image', maxCount: 1 }, { name: 'thumbnail', maxCount: 1 }]),
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("author").trim().notEmpty().withMessage("Author is required"),
@@ -202,26 +209,34 @@ router.put(
       }
 
       let imageUrl = existingArticle.rows[0].image_url;
+      let thumbnailUrl = existingArticle.rows[0].thumbnail_url;
 
-      // If new image uploaded, replace old one
-      if (req.file) {
-        // Delete old image from Cloudinary if exists
-        if (existingArticle.rows[0].image_url) {
-          const urlParts = existingArticle.rows[0].image_url.split('/');
-          const uploadIndex = urlParts.indexOf('upload');
-          const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-          const publicId = publicIdWithFolder.split('.')[0];
-
-          try {
-            await cloudinary.uploader.destroy(publicId);
-          } catch (error) {
-            console.error('Error deleting old image:', error);
-          }
+      // Helper to delete old Cloudinary image
+      const deleteCloudinaryImage = async (url) => {
+        if (!url) return;
+        const urlParts = url.split('/');
+        const uploadIndex = urlParts.indexOf('upload');
+        const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
+        const publicId = publicIdWithFolder.split('.')[0];
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (error) {
+          console.error('Error deleting old image:', error);
         }
+      };
 
-        // Upload new image
-        const uploadResult = await uploadToCloudinary(req.file.buffer);
+      // If new original image uploaded, replace old one
+      if (req.files && req.files['image'] && req.files['image'][0]) {
+        await deleteCloudinaryImage(existingArticle.rows[0].image_url);
+        const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
         imageUrl = uploadResult.secure_url;
+      }
+
+      // If new thumbnail uploaded, replace old one
+      if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
+        await deleteCloudinaryImage(existingArticle.rows[0].thumbnail_url);
+        const uploadResult = await uploadToCloudinary(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails');
+        thumbnailUrl = uploadResult.secure_url;
       }
 
       // Parse tags
@@ -233,10 +248,10 @@ router.put(
       // Update article
       const result = await pool.query(
         `UPDATE articles
-         SET title = $1, author = $2, content = $3, image_url = $4, tags = $5, category = $6, instagram_link = $7, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $8 AND site = 'lowkeygrid'
+         SET title = $1, author = $2, content = $3, image_url = $4, thumbnail_url = $5, tags = $6, category = $7, instagram_link = $8, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $9 AND site = 'lowkeygrid'
          RETURNING *`,
-        [title, author, content, imageUrl, tagsArray, category || 'trends', instagram_link || null, id]
+        [title, author, content, imageUrl, thumbnailUrl, tagsArray, category || 'trends', instagram_link || null, id]
       );
 
       res.json(result.rows[0]);
@@ -262,20 +277,22 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ error: "Article not found" });
     }
 
-    // Delete image from Cloudinary if exists
-    if (article.rows[0].image_url) {
-      const urlParts = article.rows[0].image_url.split('/');
+    // Delete images from Cloudinary if they exist
+    const deleteCloudinaryImage = async (url) => {
+      if (!url) return;
+      const urlParts = url.split('/');
       const uploadIndex = urlParts.indexOf('upload');
       const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
       const publicId = publicIdWithFolder.split('.')[0];
-
       try {
         await cloudinary.uploader.destroy(publicId);
-        console.log('Image deleted from Cloudinary');
       } catch (error) {
         console.error('Error deleting image from Cloudinary:', error);
       }
-    }
+    };
+
+    await deleteCloudinaryImage(article.rows[0].image_url);
+    await deleteCloudinaryImage(article.rows[0].thumbnail_url);
 
     // Delete from database
     await pool.query("DELETE FROM articles WHERE id = $1 AND site = 'lowkeygrid'", [id]);
