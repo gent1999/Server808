@@ -64,6 +64,178 @@ router.get("/", async (req, res) => {
   }
 });
 
+// GET /api/overalls/featured/hero - Get hero featured overall (public)
+router.get("/featured/hero", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM overalls WHERE is_hero_featured = true LIMIT 1"
+    );
+    if (result.rows.length === 0) {
+      return res.json(null);
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error fetching hero featured overall:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/overalls/featured/squares - Get square featured overalls (public)
+router.get("/featured/squares", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM overalls WHERE is_square_featured = true ORDER BY updated_at DESC LIMIT 3"
+    );
+    res.json(result.rows);
+  } catch (error) {
+    console.error("Error fetching square featured overalls:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/overalls/:id/hero-feature - Set as hero featured (protected)
+router.put("/:id/hero-feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if overall exists
+    const check = await pool.query("SELECT id FROM overalls WHERE id = $1", [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+
+    // Unset all other hero featured
+    await pool.query("UPDATE overalls SET is_hero_featured = false WHERE is_hero_featured = true");
+
+    // Set this one as hero featured
+    const result = await pool.query(
+      "UPDATE overalls SET is_hero_featured = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error setting hero featured:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /api/overalls/:id/hero-feature - Remove hero featured (protected)
+router.delete("/:id/hero-feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "UPDATE overalls SET is_hero_featured = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error removing hero featured:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/overalls/:id/square-feature - Set as square featured (protected)
+router.put("/:id/square-feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if overall exists
+    const check = await pool.query("SELECT id, is_square_featured FROM overalls WHERE id = $1", [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+
+    // If already square featured, just return it
+    if (check.rows[0].is_square_featured) {
+      return res.json(check.rows[0]);
+    }
+
+    // Check how many are already square featured
+    const countResult = await pool.query("SELECT COUNT(*) FROM overalls WHERE is_square_featured = true");
+    if (parseInt(countResult.rows[0].count) >= 3) {
+      return res.status(400).json({ error: "Maximum 3 square featured overalls allowed. Remove one first." });
+    }
+
+    const result = await pool.query(
+      "UPDATE overalls SET is_square_featured = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error setting square featured:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /api/overalls/:id/square-feature - Remove square featured (protected)
+router.delete("/:id/square-feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "UPDATE overalls SET is_square_featured = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error removing square featured:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/overalls/:id/crop - Update square crop settings (protected)
+router.put("/:id/crop", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { crop_x, crop_y, crop_zoom } = req.body;
+
+    const result = await pool.query(
+      `UPDATE overalls SET crop_x = $1, crop_y = $2, crop_zoom = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4 RETURNING *`,
+      [crop_x ?? 50, crop_y ?? 50, crop_zoom ?? 100, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error updating crop settings:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/overalls/:id/hero-crop - Update hero-specific crop settings (protected)
+router.put("/:id/hero-crop", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { hero_crop_x, hero_crop_y, hero_crop_zoom } = req.body;
+
+    const result = await pool.query(
+      `UPDATE overalls SET hero_crop_x = $1, hero_crop_y = $2, hero_crop_zoom = $3, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4 RETURNING *`,
+      [hero_crop_x ?? 50, hero_crop_y ?? 50, hero_crop_zoom ?? 100, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error updating hero crop settings:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // GET /api/overalls/:id - Get single overall by ID (public)
 router.get("/:id", async (req, res) => {
   try {
