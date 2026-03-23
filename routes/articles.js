@@ -146,6 +146,16 @@ router.post(
       // Notify search engines about the new article
       pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
+      // Request immediate indexing via IndexNow
+      const articleSlug = newArticle.title
+        .toLowerCase().trim()
+        .replace(/\s+/g, '-')
+        .replace(/[^\w\-]+/g, '')
+        .replace(/\-\-+/g, '-');
+      const articleUrl = `https://cry808.com/article/${newArticle.id}-${articleSlug}`;
+      requestIndexing(articleUrl, process.env.INDEXNOW_KEY)
+        .catch(err => console.error('IndexNow error:', err));
+
       res.status(201).json({
         message: "Article created successfully",
         article: newArticle
