@@ -70,7 +70,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, category, image_url, is_original, is_evergreen } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, image_url, is_original, is_evergreen } = req.body;
 
     try {
       let imageUrl = image_url || null; // Use provided URL if exists
@@ -135,10 +135,10 @@ router.post(
 
       // Insert article into database with all images
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, category, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING *`,
-        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
       );
 
       const newArticle = result.rows[0];
@@ -173,7 +173,7 @@ router.post(
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC"
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC"
     );
 
     res.json({
@@ -192,13 +192,13 @@ router.get("/", async (req, res) => {
 router.get("/featured/article", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') LIMIT 1"
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') LIMIT 1"
     );
 
     // If no featured article, return the latest one
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 1"
+        "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 1"
       );
 
       return res.json({
@@ -225,7 +225,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1 AND site = 'cry808' AND category IN ('article', 'interview')",
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1 AND site = 'cry808' AND category IN ('article', 'interview')",
       [id]
     );
 
@@ -261,7 +261,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, category, is_original, is_evergreen } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen } = req.body;
 
     try {
       // Check if article exists
@@ -357,16 +357,17 @@ router.put(
              youtube_url = COALESCE($7, youtube_url),
              soundcloud_url = COALESCE($8, soundcloud_url),
              genius_url = COALESCE($9, genius_url),
-             category = COALESCE($10, category),
-             is_original = $11,
-             is_evergreen = $12,
-             additional_image_1 = COALESCE($13, additional_image_1),
-             additional_image_2 = COALESCE($14, additional_image_2),
-             additional_image_3 = COALESCE($15, additional_image_3),
+             lyrics = COALESCE($10, lyrics),
+             category = COALESCE($11, category),
+             is_original = $12,
+             is_evergreen = $13,
+             additional_image_1 = COALESCE($14, additional_image_1),
+             additional_image_2 = COALESCE($15, additional_image_2),
+             additional_image_3 = COALESCE($16, additional_image_3),
              updated_at = CURRENT_TIMESTAMP
-         WHERE id = $16
+         WHERE id = $17
          RETURNING *`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, category || null, isOriginalValue, isEvergreenValue, additionalImage1, additionalImage2, additionalImage3, id]
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || null, isOriginalValue, isEvergreenValue, additionalImage1, additionalImage2, additionalImage3, id]
       );
 
       console.log('Updated is_original to:', result.rows[0].is_original);
