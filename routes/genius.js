@@ -46,7 +46,61 @@ async function resolveFromGenius(geniusUrl, query) {
   }
 }
 
-/** Step 2a: Search lrclib.net */
+/** Extract lyrics from Genius HTML (same technique as lyricsgenius) */
+function extractLyricsFromHtml(html) {
+  const sections = [];
+  let searchFrom = 0;
+  while (true) {
+    const markerIdx = html.indexOf('data-lyrics-container="true"', searchFrom);
+    if (markerIdx === -1) break;
+    const openTagEnd = html.indexOf('>', markerIdx) + 1;
+    let depth = 1, i = openTagEnd;
+    while (i < html.length && depth > 0) {
+      const nextOpen  = html.indexOf('<div', i);
+      const nextClose = html.indexOf('</div', i);
+      if (nextClose === -1) break;
+      if (nextOpen !== -1 && nextOpen < nextClose) { depth++; i = nextOpen + 4; }
+      else {
+        depth--;
+        if (depth === 0) sections.push(html.slice(openTagEnd, nextClose));
+        i = nextClose + 6;
+      }
+    }
+    searchFrom = openTagEnd;
+  }
+  if (!sections.length) return null;
+  return sections.map(s =>
+    s.replace(/<br\s*\/?>/gi, '\n')
+     .replace(/<[^>]+>/g, '')
+     .replace(/&#x27;/g, "'").replace(/&amp;/g, '&')
+     .replace(/&quot;/g, '"').replace(/\n{3,}/g, '\n\n').trim()
+  ).join('\n\n');
+}
+
+/**
+ * Fetch Genius lyrics page with Bearer token — same approach as lyricsgenius.
+ * Authenticated requests are not blocked by Genius bot detection.
+ */
+async function fetchFromGenius(geniusUrl, songTitle) {
+  const token = process.env.GENIUS_ACCESS_TOKEN;
+  if (!token) return null;
+  try {
+    const res = await fetch(geniusUrl, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const lyrics = extractLyricsFromHtml(html);
+    return lyrics ? { lyrics, title: songTitle } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Search lrclib.net */
 async function fetchFromLrclib(artist, title) {
   const q = artist ? `${artist} ${title}` : title;
   const res = await fetch(
@@ -59,7 +113,7 @@ async function fetchFromLrclib(artist, title) {
   return hit ? { lyrics: hit.plainLyrics, title: `${hit.artistName} – ${hit.trackName}` } : null;
 }
 
-/** Step 2b: Fallback — lyrics.ovh */
+/** Fallback — lyrics.ovh */
 async function fetchFromLyricsOvh(artist, title) {
   if (!artist) return null;
   const res = await fetch(
@@ -82,8 +136,11 @@ router.get('/', async (req, res) => {
   try {
     const { artist, title } = await resolveFromGenius(url, query);
 
-    // Try lrclib first, then lyrics.ovh
+    // 1. Authenticated Genius scrape (lyricsgenius approach) — best quality
+    // 2. lrclib.net
+    // 3. lyrics.ovh
     const result =
+      (await fetchFromGenius(url, `${artist || ''} – ${title}`)) ||
       (await fetchFromLrclib(artist, title)) ||
       (await fetchFromLyricsOvh(artist, title));
 
