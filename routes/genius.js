@@ -16,6 +16,17 @@ router.get('/', async (req, res) => {
   try {
     const client = new Client(token);
 
+    // The library uses client.request (no auth) for page fetches and client.api
+    // (with Bearer token) for API calls. Inject the token into client.request so
+    // that lyrics page fetches are authenticated — bypasses Vercel IP blocking.
+    client.request.options = {
+      ...client.request.options,
+      headers: {
+        ...client.request.options?.headers,
+        Authorization: `Bearer ${token}`,
+      },
+    };
+
     const slug = new URL(url).pathname
       .replace(/^\//, '')
       .replace(/-lyrics$/, '')
