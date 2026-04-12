@@ -117,8 +117,8 @@ app.use("/api/overalls", overallsRoutes);
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
 
-// Genius oEmbed proxy (public)
-app.use("/api/genius-embed", geniusRoutes);
+// Genius lyrics scraper (public)
+app.use("/api/genius-lyrics", geniusRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
