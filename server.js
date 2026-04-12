@@ -16,6 +16,7 @@ import sitemapRoutes from "./routes/sitemap.js";
 import lowkeygridSitemapRoutes from "./routes/lowkeygridSitemap.js";
 import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
+import geniusRoutes from "./routes/genius.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -115,6 +116,9 @@ app.use("/api/overalls", overallsRoutes);
 
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
+
+// Genius oEmbed proxy (public)
+app.use("/api/genius-embed", geniusRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
