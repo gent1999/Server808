@@ -1,7 +1,39 @@
 import express from 'express';
 import { Client } from 'genius-lyrics';
+import { parse as parseHtml } from 'node-html-parser';
 
 const router = express.Router();
+
+/**
+ * Fetch the Genius lyrics page via allorigins.win proxy.
+ * Genius IP-blocks Vercel's servers; allorigins routes through neutral IPs.
+ */
+async function fetchLyricsHtml(songUrl) {
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(songUrl)}`;
+  const res = await fetch(proxyUrl, {
+    headers: { 'User-Agent': 'Mozilla/5.0' },
+  });
+  if (!res.ok) throw new Error(`Proxy returned ${res.status}`);
+  return res.text();
+}
+
+/**
+ * Parse lyrics from Genius HTML using the same selector genius-lyrics uses.
+ */
+function extractLyrics(html) {
+  const root = parseHtml(html);
+  const containers = root.querySelectorAll("[data-lyrics-container='true']");
+  if (!containers.length) return null;
+
+  return containers
+    .map(el => {
+      el.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+      return el.text;
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 // @route   GET /api/genius-lyrics?url=
 // @desc    Fetch lyrics for a Genius song URL
@@ -14,19 +46,8 @@ router.get('/', async (req, res) => {
   if (!token) return res.status(500).json({ message: 'GENIUS_ACCESS_TOKEN not configured' });
 
   try {
+    // Use Genius API (not blocked) to find the exact song
     const client = new Client(token);
-
-    // The library uses client.request (no auth) for page fetches and client.api
-    // (with Bearer token) for API calls. Inject the token into client.request so
-    // that lyrics page fetches are authenticated — bypasses Vercel IP blocking.
-    client.request.options = {
-      ...client.request.options,
-      headers: {
-        ...client.request.options?.headers,
-        Authorization: `Bearer ${token}`,
-      },
-    };
-
     const slug = new URL(url).pathname
       .replace(/^\//, '')
       .replace(/-lyrics$/, '')
@@ -39,14 +60,17 @@ router.get('/', async (req, res) => {
     }
 
     const song = results.find(s => s.url?.toLowerCase() === url.toLowerCase()) || results[0];
-    let lyrics = await song.lyrics();
+
+    // Fetch the lyrics page via proxy (bypasses Genius IP block on Vercel)
+    const html = await fetchLyricsHtml(song.url);
+    let lyrics = extractLyrics(html);
 
     if (!lyrics) {
-      return res.status(404).json({ message: 'Lyrics not available for this song' });
+      return res.status(404).json({ message: 'Lyrics not found on page' });
     }
 
-    // Strip the "N ContributorSong Title Lyrics" header the library prepends
-    lyrics = lyrics.replace(/^\d+\s*Contributor[s]?.*?Lyrics/s, '').trim();
+    // Strip "N Contributor(s)Song Title Lyrics" header
+    lyrics = lyrics.replace(/^\d+\s*Contributors?\s*.+?Lyrics/s, '').trim();
 
     res.json({
       lyrics,
