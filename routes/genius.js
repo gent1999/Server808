@@ -91,11 +91,14 @@ async function fetchFromGenius(geniusUrl, songTitle) {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
     });
+    console.log(`[fetchFromGenius] status=${res.status} url=${geniusUrl}`);
     if (!res.ok) return null;
     const html = await res.text();
     const lyrics = extractLyricsFromHtml(html);
+    console.log(`[fetchFromGenius] lyrics found: ${!!lyrics}, length: ${lyrics?.length}`);
     return lyrics ? { lyrics, title: songTitle } : null;
-  } catch {
+  } catch (e) {
+    console.error(`[fetchFromGenius] error: ${e.message}`);
     return null;
   }
 }
@@ -135,14 +138,16 @@ router.get('/', async (req, res) => {
 
   try {
     const { artist, title } = await resolveFromGenius(url, query);
+    console.log(`[genius-lyrics] resolved: artist="${artist}" title="${title}"`);
 
-    // 1. Authenticated Genius scrape (lyricsgenius approach) — best quality
-    // 2. lrclib.net
-    // 3. lyrics.ovh
-    const result =
-      (await fetchFromGenius(url, `${artist || ''} – ${title}`)) ||
-      (await fetchFromLrclib(artist, title)) ||
-      (await fetchFromLyricsOvh(artist, title));
+    const geniusResult = await fetchFromGenius(url, `${artist || ''} – ${title}`);
+    console.log(`[genius-lyrics] fetchFromGenius: ${geniusResult ? 'HIT' : 'MISS'}`);
+
+    const lrclibResult = geniusResult || await fetchFromLrclib(artist, title);
+    console.log(`[genius-lyrics] fetchFromLrclib: ${lrclibResult ? 'HIT' : 'MISS'}`);
+
+    const result = lrclibResult || await fetchFromLyricsOvh(artist, title);
+    console.log(`[genius-lyrics] fetchFromLyricsOvh: ${result ? 'HIT' : 'MISS'}`);
 
     if (!result) {
       return res.status(404).json({ message: 'No lyrics found' });
@@ -150,7 +155,7 @@ router.get('/', async (req, res) => {
 
     res.json(result);
   } catch (error) {
-    console.error('Lyrics fetch error:', error.message);
+    console.error('[genius-lyrics] error:', error.message);
     res.status(500).json({ message: 'Server error' });
   }
 });
