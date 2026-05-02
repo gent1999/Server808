@@ -261,7 +261,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen, remove_additional_image_1, remove_additional_image_2, remove_additional_image_3 } = req.body;
 
     try {
       // Check if article exists
@@ -345,6 +345,20 @@ router.put(
         isEvergreenValue = true;
       }
 
+      // Resolve final additional image values (support explicit removal)
+      const existingArticle = checkResult.rows[0];
+      let finalAdditionalImage1 = existingArticle.additional_image_1;
+      if (remove_additional_image_1 === 'true') finalAdditionalImage1 = null;
+      else if (additionalImage1) finalAdditionalImage1 = additionalImage1;
+
+      let finalAdditionalImage2 = existingArticle.additional_image_2;
+      if (remove_additional_image_2 === 'true') finalAdditionalImage2 = null;
+      else if (additionalImage2) finalAdditionalImage2 = additionalImage2;
+
+      let finalAdditionalImage3 = existingArticle.additional_image_3;
+      if (remove_additional_image_3 === 'true') finalAdditionalImage3 = null;
+      else if (additionalImage3) finalAdditionalImage3 = additionalImage3;
+
       // Update article (only update images if new ones were uploaded)
       const result = await pool.query(
         `UPDATE articles
@@ -361,13 +375,13 @@ router.put(
              category = COALESCE($11, category),
              is_original = $12,
              is_evergreen = $13,
-             additional_image_1 = COALESCE($14, additional_image_1),
-             additional_image_2 = COALESCE($15, additional_image_2),
-             additional_image_3 = COALESCE($16, additional_image_3),
+             additional_image_1 = $14,
+             additional_image_2 = $15,
+             additional_image_3 = $16,
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $17
          RETURNING *`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || null, isOriginalValue, isEvergreenValue, additionalImage1, additionalImage2, additionalImage3, id]
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || null, isOriginalValue, isEvergreenValue, finalAdditionalImage1, finalAdditionalImage2, finalAdditionalImage3, id]
       );
 
       console.log('Updated is_original to:', result.rows[0].is_original);
