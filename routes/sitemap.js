@@ -61,6 +61,25 @@ router.get('/sitemap.xml', async (req, res) => {
     xml += '    <priority>1.0</priority>\n';
     xml += '  </url>\n';
 
+    // Static pages
+    const staticPages = [
+      { path: '/news',           changefreq: 'daily',   priority: '0.9' },
+      { path: '/interviews',     changefreq: 'daily',   priority: '0.9' },
+      { path: '/about',          changefreq: 'monthly', priority: '0.6' },
+      { path: '/contact',        changefreq: 'monthly', priority: '0.5' },
+      { path: '/submit-music',   changefreq: 'monthly', priority: '0.5' },
+      { path: '/privacy-policy', changefreq: 'yearly',  priority: '0.3' },
+      { path: '/terms-of-use',   changefreq: 'yearly',  priority: '0.3' },
+      { path: '/dmca',           changefreq: 'yearly',  priority: '0.3' },
+    ];
+    staticPages.forEach(({ path, changefreq, priority }) => {
+      xml += '  <url>\n';
+      xml += `    <loc>${baseUrl}${path}</loc>\n`;
+      xml += `    <changefreq>${changefreq}</changefreq>\n`;
+      xml += `    <priority>${priority}</priority>\n`;
+      xml += '  </url>\n';
+    });
+
     // Add each article
     articles.forEach(article => {
       const articleUrl = generateArticleUrl(article.id, article.title);
