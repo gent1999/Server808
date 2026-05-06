@@ -59,10 +59,35 @@ router.post('/enqueue', auth, async (req, res) => {
   if (!url) return res.status(400).json({ message: 'url is required' });
   try {
     const { rows } = await pool.query(
-      'INSERT INTO indexing_queue (url, article_id) VALUES ($1, $2) RETURNING *',
+      `INSERT INTO indexing_queue (url, article_id)
+       SELECT $1, $2
+       WHERE NOT EXISTS (
+         SELECT 1 FROM indexing_queue
+         WHERE url = $1 AND status IN ('pending', 'running', 'indexed')
+       )
+       RETURNING *`,
       [url, articleId || null]
     );
+    if (rows.length === 0) {
+      return res.json({ message: 'Already queued or indexed', skipped: true });
+    }
     res.json({ message: 'Enqueued', item: rows[0] });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── POST /api/indexer/test-enqueue ───────────────────────────────────────────
+// Dev helper — enqueues a dummy URL to test the full auto-indexing flow
+router.post('/test-enqueue', auth, async (req, res) => {
+  const url = req.body.url || `https://cry808.com/article/test-${Date.now()}`;
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO indexing_queue (url, article_id) VALUES ($1, NULL) RETURNING *',
+      [url]
+    );
+    console.log('[Indexer] Test enqueue:', url);
+    res.json({ message: 'Test item enqueued', item: rows[0] });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
