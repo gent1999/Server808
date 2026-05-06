@@ -6,6 +6,7 @@ import cloudinary from "../config/cloudinary.js";
 import { Readable } from "stream";
 import auth from "../middleware/auth.js";
 import { pingSitemap, requestIndexing } from "../utils/sitemapPing.js";
+import fetch from "node-fetch";
 
 const router = express.Router();
 
@@ -156,18 +157,22 @@ router.post(
       requestIndexing(articleUrl, process.env.INDEXNOW_KEY)
         .catch(err => console.error('IndexNow error:', err));
 
-      // Enqueue for GSC Playwright indexer (skip if already pending/indexed)
-      pool.query(
-        `INSERT INTO indexing_queue (url, article_id)
-         SELECT $1, $2
-         WHERE NOT EXISTS (
-           SELECT 1 FROM indexing_queue
-           WHERE url = $1 AND status IN ('pending', 'running', 'indexed')
-         )`,
-        [articleUrl, newArticle.id]
-      ).then(r => {
-        if (r.rowCount > 0) console.log('[Indexer] New article published, queued for indexing:', articleUrl);
-      }).catch(err => console.error('[Indexer] Auto-enqueue error:', err.message));
+      // Wake the 808engine Indexer agent directly
+      const engineUrl = process.env.ENGINE_URL;
+      if (engineUrl) {
+        fetch(`${engineUrl}/api/indexer/wake`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(process.env.ENGINE_SECRET ? { 'x-engine-secret': process.env.ENGINE_SECRET } : {}),
+          },
+          body: JSON.stringify({ url: articleUrl }),
+        })
+          .then(() => console.log('[Indexer] New article published, woke agent for:', articleUrl))
+          .catch(err => console.error('[Indexer] Failed to wake agent:', err.message));
+      } else {
+        console.log('[Indexer] ENGINE_URL not set — add it to env to auto-trigger indexing');
+      }
 
       res.status(201).json({
         message: "Article created successfully",
