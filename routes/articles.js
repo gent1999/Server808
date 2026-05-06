@@ -156,6 +156,12 @@ router.post(
       requestIndexing(articleUrl, process.env.INDEXNOW_KEY)
         .catch(err => console.error('IndexNow error:', err));
 
+      // Enqueue for GSC Playwright indexer
+      pool.query(
+        'INSERT INTO indexing_queue (url, article_id) VALUES ($1, $2)',
+        [articleUrl, newArticle.id]
+      ).catch(err => console.error('[Indexer] Auto-enqueue error:', err.message));
+
       res.status(201).json({
         message: "Article created successfully",
         article: newArticle

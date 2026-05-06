@@ -31,3 +31,5 @@ publish-evergreen-*.js
 insert-*.js
 update-*.js
 add-*.js
+# Playwright browser session (contains Google login cookies)
+playwright/.auth/*.json

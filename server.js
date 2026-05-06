@@ -17,6 +17,7 @@ import lowkeygridSitemapRoutes from "./routes/lowkeygridSitemap.js";
 import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
 import geniusRoutes from "./routes/genius.js";
+import indexerRoutes from "./routes/indexer.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -106,6 +107,9 @@ app.use("/api/amazon-products", (req, res, next) => {
   }
   next();
 }, amazonProductsRoutes);
+
+// Indexer routes (protected - admin only)
+app.use("/api/indexer", authMiddleware, indexerRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
