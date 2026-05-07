@@ -273,6 +273,53 @@ router.get("/featured/article", async (req, res) => {
   }
 });
 
+// ── GET /api/articles/index-check-queue ──────────────────────────────────────
+router.get('/index-check-queue', auth, async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 10;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, article_url,
+              indexed_on_google, last_index_checked_at,
+              index_attempt_count, last_index_status,
+              first_index_requested_at, last_index_requested_at,
+              created_at
+       FROM articles
+       WHERE article_url IS NOT NULL
+         AND (indexed_on_google = false OR indexed_on_google IS NULL)
+         AND (
+           last_index_checked_at IS NULL
+           OR last_index_checked_at < NOW() - INTERVAL '6 hours'
+         )
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ articles: rows });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── GET /api/articles/index-stats ─────────────────────────────────────────────
+router.get('/index-stats', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE indexed_on_google = true)                             AS indexed,
+        COUNT(*) FILTER (WHERE indexed_on_google = false OR indexed_on_google IS NULL) AS not_indexed,
+        COUNT(*) FILTER (WHERE last_index_status = 'requested')                      AS requested,
+        COUNT(*) FILTER (WHERE last_index_status = 'not_indexed')                    AS confirmed_not_indexed,
+        COUNT(*) FILTER (WHERE last_index_status = 'error')                          AS errored,
+        COUNT(*)                                                                      AS total
+      FROM articles
+      WHERE article_url IS NOT NULL
+    `);
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 // @route   GET /api/articles/:id
 // @desc    Get single article by ID
 // @access  Public
@@ -525,38 +572,7 @@ router.delete("/:id", auth, async (req, res) => {
   }
 });
 
-// ── GET /api/articles/index-check-queue ──────────────────────────────────────
-// Returns articles that need index status verification.
-// Priority: indexed_on_google = false, not checked in last 6h, newest first.
-// Also includes articles eligible for retry based on age + attempt count.
-router.get('/index-check-queue', auth, async (req, res) => {
-  const limit = parseInt(req.query.limit, 10) || 10;
-  try {
-    const { rows } = await pool.query(
-      `SELECT id, title, article_url,
-              indexed_on_google, last_index_checked_at,
-              index_attempt_count, last_index_status,
-              first_index_requested_at, last_index_requested_at,
-              created_at
-       FROM articles
-       WHERE article_url IS NOT NULL
-         AND (indexed_on_google = false OR indexed_on_google IS NULL)
-         AND (
-           last_index_checked_at IS NULL
-           OR last_index_checked_at < NOW() - INTERVAL '6 hours'
-         )
-       ORDER BY created_at DESC
-       LIMIT $1`,
-      [limit]
-    );
-    res.json({ articles: rows });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
 // ── PATCH /api/articles/:id/index-status ──────────────────────────────────────
-// Called by 808-engine after checking or requesting indexing.
 router.patch('/:id/index-status', auth, async (req, res) => {
   const { id } = req.params;
   const {
@@ -593,26 +609,6 @@ router.patch('/:id/index-status', auth, async (req, res) => {
       ]
     );
     res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// ── GET /api/articles/index-stats ─────────────────────────────────────────────
-router.get('/index-stats', auth, async (req, res) => {
-  try {
-    const { rows } = await pool.query(`
-      SELECT
-        COUNT(*) FILTER (WHERE indexed_on_google = true)                        AS indexed,
-        COUNT(*) FILTER (WHERE indexed_on_google = false OR indexed_on_google IS NULL) AS not_indexed,
-        COUNT(*) FILTER (WHERE last_index_status = 'requested')                AS requested,
-        COUNT(*) FILTER (WHERE last_index_status = 'not_indexed')              AS confirmed_not_indexed,
-        COUNT(*) FILTER (WHERE last_index_status = 'error')                    AS errored,
-        COUNT(*)                                                                AS total
-      FROM articles
-      WHERE article_url IS NOT NULL
-    `);
-    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
