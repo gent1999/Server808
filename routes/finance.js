@@ -180,11 +180,53 @@ router.get('/sources', auth, async (req, res) => {
       `SELECT rs.*,
         COALESCE((SELECT SUM(re.net_amount) FROM revenue_entries re
                   WHERE re.source_id = rs.id AND re.payout_status = 'not_ready'
-                    AND re.payment_status != 'cancelled'), 0) AS current_balance,
-        (SELECT COUNT(*) FROM revenue_entries re WHERE re.source_id = rs.id) AS entry_count
+                    AND re.payment_status != 'cancelled'), 0)          AS current_balance,
+        COALESCE((SELECT SUM(re.net_amount) FROM revenue_entries re
+                  WHERE re.source_id = rs.id
+                    AND re.payment_status != 'cancelled'), 0)           AS lifetime_net,
+        (SELECT COUNT(*) FROM revenue_entries re
+         WHERE re.source_id = rs.id)                                    AS entry_count,
+        (SELECT MAX(re.date) FROM revenue_entries re
+         WHERE re.source_id = rs.id)                                    AS last_entry_date
        FROM revenue_sources rs ORDER BY rs.id`
     );
     res.json({ sources: rows });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── GET /api/finance/activity ─────────────────────────────────────────────────
+// Combined recent activity feed across entries, payouts, and expenses
+router.get('/activity', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT * FROM (
+        SELECT 'revenue' AS kind,
+          re.id, re.created_at,
+          CONCAT(COALESCE(rs.name,'Unknown'), ' — +', re.net_amount::text, ' net') AS label,
+          re.net_amount::float AS amount,
+          COALESCE(re.article_title, re.client_name, '') AS detail,
+          re.payment_status AS status
+        FROM revenue_entries re
+        LEFT JOIN revenue_sources rs ON re.source_id = rs.id
+        UNION ALL
+        SELECT 'payout' AS kind,
+          p.id, p.created_at,
+          CONCAT(COALESCE(rs.name,'Unknown'), ' — payout ', p.amount::text) AS label,
+          p.amount::float AS amount, '' AS detail, 'paid' AS status
+        FROM payouts p
+        LEFT JOIN revenue_sources rs ON p.source_id = rs.id
+        UNION ALL
+        SELECT 'expense' AS kind,
+          e.id, e.created_at,
+          CONCAT(e.name, ' — -', e.amount::text) AS label,
+          e.amount::float AS amount,
+          COALESCE(e.vendor,'') AS detail, e.payment_status AS status
+        FROM expenses e
+      ) combined
+      ORDER BY created_at DESC
+      LIMIT 15
+    `);
+    res.json({ activity: rows });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
