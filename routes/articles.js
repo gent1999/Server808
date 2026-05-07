@@ -22,7 +22,25 @@ pool.query(`
     ADD COLUMN IF NOT EXISTS indexed_detected_at       TIMESTAMP,
     ADD COLUMN IF NOT EXISTS last_index_status         VARCHAR(30),
     ADD COLUMN IF NOT EXISTS last_index_error          TEXT
-`).catch(err => console.error('[Articles] Index schema migration error:', err.message));
+`).then(() =>
+  // Backfill article_url for any existing articles that don't have it yet.
+  // Replicates the same slug logic used in the POST /api/articles handler.
+  pool.query(`
+    UPDATE articles
+    SET article_url = CONCAT(
+      'https://cry808.com/article/',
+      id::text, '-',
+      REGEXP_REPLACE(
+        REGEXP_REPLACE(
+          REGEXP_REPLACE(LOWER(TRIM(title)), '\\s+', '-', 'g'),
+          '[^a-z0-9\\-]', '', 'g'
+        ),
+        '-{2,}', '-', 'g'
+      )
+    )
+    WHERE article_url IS NULL AND title IS NOT NULL
+  `)
+).catch(err => console.error('[Articles] Index schema migration error:', err.message));
 
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
