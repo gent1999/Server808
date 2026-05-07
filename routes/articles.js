@@ -10,6 +10,20 @@ import fetch from "node-fetch";
 
 const router = express.Router();
 
+// ── Article indexing schema migration (runs on every boot, safe with IF NOT EXISTS) ──
+pool.query(`
+  ALTER TABLE articles
+    ADD COLUMN IF NOT EXISTS article_url               TEXT,
+    ADD COLUMN IF NOT EXISTS indexed_on_google         BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS last_index_checked_at     TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS index_attempt_count       INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS first_index_requested_at  TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS last_index_requested_at   TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS indexed_detected_at       TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS last_index_status         VARCHAR(30),
+    ADD COLUMN IF NOT EXISTS last_index_error          TEXT
+`).catch(err => console.error('[Articles] Index schema migration error:', err.message));
+
 // Configure multer for memory storage
 const storage = multer.memoryStorage();
 const upload = multer({
@@ -144,6 +158,25 @@ router.post(
 
       const newArticle = result.rows[0];
 
+      // Build canonical article URL + record initial indexing state
+      const articleSlugForUrl = newArticle.title
+        .toLowerCase().trim()
+        .replace(/\s+/g, '-')
+        .replace(/[^\w\-]+/g, '')
+        .replace(/\-\-+/g, '-');
+      const canonicalUrl = `https://cry808.com/article/${newArticle.id}-${articleSlugForUrl}`;
+
+      pool.query(
+        `UPDATE articles
+         SET article_url              = $1,
+             last_index_status        = 'requested',
+             first_index_requested_at = CURRENT_TIMESTAMP,
+             last_index_requested_at  = CURRENT_TIMESTAMP,
+             index_attempt_count      = 1
+         WHERE id = $2`,
+        [canonicalUrl, newArticle.id]
+      ).catch(err => console.error('[Articles] Index state update error:', err.message));
+
       // Notify search engines about the new article
       pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
@@ -157,7 +190,7 @@ router.post(
       requestIndexing(articleUrl, process.env.INDEXNOW_KEY)
         .catch(err => console.error('IndexNow error:', err));
 
-      // Wake the 808engine Indexer agent directly
+      // Wake the 808engine Indexer — pass metadata so it can label the job correctly
       const engineUrl = process.env.ENGINE_URL;
       if (engineUrl) {
         fetch(`${engineUrl}/api/indexer/wake`, {
@@ -166,9 +199,14 @@ router.post(
             'Content-Type': 'application/json',
             ...(process.env.ENGINE_SECRET ? { 'x-engine-secret': process.env.ENGINE_SECRET } : {}),
           },
-          body: JSON.stringify({ url: articleUrl }),
+          body: JSON.stringify({
+            url:       articleUrl,
+            title:     title,
+            source:    'manual',
+            articleId: newArticle.id,
+          }),
         })
-          .then(() => console.log('[Indexer] New article published, woke agent for:', articleUrl))
+          .then(() => console.log('[Indexer] Woke 808engine for:', articleUrl))
           .catch(err => console.error('[Indexer] Failed to wake agent:', err.message));
       } else {
         console.log('[Indexer] ENGINE_URL not set — add it to env to auto-trigger indexing');
@@ -484,6 +522,99 @@ router.delete("/:id", auth, async (req, res) => {
   } catch (error) {
     console.error('Error deleting article:', error.message);
     res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /api/articles/index-check-queue ──────────────────────────────────────
+// Returns articles that need index status verification.
+// Priority: indexed_on_google = false, not checked in last 6h, newest first.
+// Also includes articles eligible for retry based on age + attempt count.
+router.get('/index-check-queue', auth, async (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 10;
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, title, article_url,
+              indexed_on_google, last_index_checked_at,
+              index_attempt_count, last_index_status,
+              first_index_requested_at, last_index_requested_at,
+              created_at
+       FROM articles
+       WHERE article_url IS NOT NULL
+         AND (indexed_on_google = false OR indexed_on_google IS NULL)
+         AND (
+           last_index_checked_at IS NULL
+           OR last_index_checked_at < NOW() - INTERVAL '6 hours'
+         )
+       ORDER BY created_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json({ articles: rows });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── PATCH /api/articles/:id/index-status ──────────────────────────────────────
+// Called by 808-engine after checking or requesting indexing.
+router.patch('/:id/index-status', auth, async (req, res) => {
+  const { id } = req.params;
+  const {
+    indexed_on_google,
+    last_index_status,
+    last_index_error,
+    indexed_detected_at,
+    last_index_checked_at,
+    last_index_requested_at,
+    index_attempt_count,
+  } = req.body;
+
+  try {
+    await pool.query(
+      `UPDATE articles
+       SET indexed_on_google        = COALESCE($1, indexed_on_google),
+           last_index_status        = COALESCE($2, last_index_status),
+           last_index_error         = $3,
+           indexed_detected_at      = COALESCE($4, indexed_detected_at),
+           last_index_checked_at    = COALESCE($5, CURRENT_TIMESTAMP),
+           last_index_requested_at  = COALESCE($6, last_index_requested_at),
+           index_attempt_count      = COALESCE($7, index_attempt_count),
+           updated_at               = CURRENT_TIMESTAMP
+       WHERE id = $8`,
+      [
+        indexed_on_google ?? null,
+        last_index_status || null,
+        last_index_error || null,
+        indexed_detected_at || null,
+        last_index_checked_at || null,
+        last_index_requested_at || null,
+        index_attempt_count ?? null,
+        id,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── GET /api/articles/index-stats ─────────────────────────────────────────────
+router.get('/index-stats', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE indexed_on_google = true)                        AS indexed,
+        COUNT(*) FILTER (WHERE indexed_on_google = false OR indexed_on_google IS NULL) AS not_indexed,
+        COUNT(*) FILTER (WHERE last_index_status = 'requested')                AS requested,
+        COUNT(*) FILTER (WHERE last_index_status = 'not_indexed')              AS confirmed_not_indexed,
+        COUNT(*) FILTER (WHERE last_index_status = 'error')                    AS errored,
+        COUNT(*)                                                                AS total
+      FROM articles
+      WHERE article_url IS NOT NULL
+    `);
+    res.json(rows[0]);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
   }
 });
 

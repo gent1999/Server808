@@ -4,21 +4,29 @@ import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Create table if not exists (runs on server boot)
+// Create table + add new tracking columns if not already present
 pool.query(`
   CREATE TABLE IF NOT EXISTS indexing_queue (
     id            SERIAL PRIMARY KEY,
     article_id    INTEGER,
     url           TEXT NOT NULL,
-    status        VARCHAR(20) DEFAULT 'pending'
-                  CHECK (status IN ('pending','running','indexed','failed','needs_login')),
+    status        VARCHAR(30) DEFAULT 'pending',
     attempts      INTEGER DEFAULT 0,
     error_message TEXT,
     created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at  TIMESTAMP
   )
-`).catch(err => console.error('[Indexer] Table init error:', err.message));
+`).then(() => pool.query(`
+  ALTER TABLE indexing_queue
+    ADD COLUMN IF NOT EXISTS source                   VARCHAR(20),
+    ADD COLUMN IF NOT EXISTS article_title            TEXT,
+    ADD COLUMN IF NOT EXISTS current_step             VARCHAR(30),
+    ADD COLUMN IF NOT EXISTS sitemap_status           VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS inspection_status        VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS request_indexing_status  VARCHAR(40),
+    ADD COLUMN IF NOT EXISTS screenshot_path          TEXT
+`)).catch(err => console.error('[Indexer] Schema init error:', err.message));
 
 // ── GET /api/indexer/status ───────────────────────────────────────────────────
 router.get('/status', auth, async (req, res) => {
@@ -55,23 +63,41 @@ router.get('/queue', auth, async (req, res) => {
 
 // ── POST /api/indexer/enqueue ─────────────────────────────────────────────────
 router.post('/enqueue', auth, async (req, res) => {
-  const { url, articleId } = req.body;
+  const { url, articleId, title, source } = req.body;
   if (!url) return res.status(400).json({ message: 'url is required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO indexing_queue (url, article_id)
-       SELECT $1, $2
+      `INSERT INTO indexing_queue (url, article_id, article_title, source)
+       SELECT $1, $2, $3, $4
        WHERE NOT EXISTS (
          SELECT 1 FROM indexing_queue
          WHERE url = $1 AND status IN ('pending', 'running', 'indexed')
        )
        RETURNING *`,
-      [url, articleId || null]
+      [url, articleId || null, title || null, source || 'manual']
     );
     if (rows.length === 0) {
       return res.json({ message: 'Already queued or indexed', skipped: true });
     }
     res.json({ message: 'Enqueued', item: rows[0] });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── GET /api/indexer/recent ───────────────────────────────────────────────────
+router.get('/recent', auth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, url, article_title, source, status, current_step,
+              sitemap_status, inspection_status, request_indexing_status,
+              error_message, screenshot_path, attempts,
+              created_at, updated_at, completed_at
+       FROM indexing_queue
+       ORDER BY updated_at DESC
+       LIMIT 20`
+    );
+    res.json({ jobs: rows });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -94,23 +120,35 @@ router.post('/test-enqueue', auth, async (req, res) => {
 });
 
 // ── PATCH /api/indexer/queue/:id ─────────────────────────────────────────────
-// Called by 808engine to update item status after processing
 router.patch('/queue/:id', auth, async (req, res) => {
   const { id } = req.params;
-  const { status, errorMessage, attempts } = req.body;
+  const {
+    status, errorMessage, attempts,
+    current_step, sitemap_status, inspection_status,
+    request_indexing_status, screenshot_path,
+  } = req.body;
   try {
     const completedAt = ['indexed', 'failed', 'needs_login'].includes(status)
-      ? 'CURRENT_TIMESTAMP'
-      : 'NULL';
+      ? 'CURRENT_TIMESTAMP' : 'NULL';
     await pool.query(
       `UPDATE indexing_queue
-       SET status        = COALESCE($1, status),
-           error_message = $2,
-           attempts      = COALESCE($3, attempts),
-           completed_at  = ${completedAt},
-           updated_at    = CURRENT_TIMESTAMP
-       WHERE id = $4`,
-      [status || null, errorMessage || null, attempts || null, id]
+       SET status                   = COALESCE($1,  status),
+           error_message            = COALESCE($2,  error_message),
+           attempts                 = COALESCE($3,  attempts),
+           current_step             = COALESCE($4,  current_step),
+           sitemap_status           = COALESCE($5,  sitemap_status),
+           inspection_status        = COALESCE($6,  inspection_status),
+           request_indexing_status  = COALESCE($7,  request_indexing_status),
+           screenshot_path          = COALESCE($8,  screenshot_path),
+           completed_at             = ${completedAt},
+           updated_at               = CURRENT_TIMESTAMP
+       WHERE id = $9`,
+      [
+        status || null, errorMessage || null, attempts || null,
+        current_step || null, sitemap_status || null,
+        inspection_status || null, request_indexing_status || null,
+        screenshot_path || null, id,
+      ]
     );
     res.json({ ok: true });
   } catch (err) {
