@@ -18,6 +18,7 @@ import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
 import geniusRoutes from "./routes/genius.js";
 import indexerRoutes from "./routes/indexer.js";
+import financeRoutes from "./routes/finance.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -110,6 +111,9 @@ app.use("/api/amazon-products", (req, res, next) => {
 
 // Indexer routes (protected - admin only)
 app.use("/api/indexer", authMiddleware, indexerRoutes);
+
+// Finance / Revenue Ops routes (protected - admin only)
+app.use("/api/finance", authMiddleware, financeRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
