@@ -305,6 +305,52 @@ router.get("/article/:slug", auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/analytics/article-pages
+// @desc    Bulk GA data for all /article/ pages — one request for the entire content library
+// @access  Private (Admin only)
+router.get("/article-pages", auth, async (req, res) => {
+  if (!analyticsDataClient) {
+    return res.json({ pages: {}, configured: false });
+  }
+  const propertyId = process.env.GA_PROPERTY_ID;
+  if (!propertyId) return res.json({ pages: {}, configured: false });
+
+  try {
+    const [response] = await analyticsDataClient.runReport({
+      property: `properties/${propertyId}`,
+      dateRanges: [{ startDate: "28daysAgo", endDate: "today" }],
+      dimensions: [{ name: "pagePath" }],
+      dimensionFilter: {
+        filter: {
+          fieldName: "pagePath",
+          stringFilter: { matchType: "BEGINS_WITH", value: "/article/" },
+        },
+      },
+      metrics: [
+        { name: "screenPageViews" },
+        { name: "activeUsers" },
+      ],
+      limit: 1000,
+    });
+
+    const pages = {};
+    (response.rows || []).forEach(row => {
+      const path = row.dimensionValues[0]?.value;
+      if (path) {
+        pages[path] = {
+          pageViews:      parseInt(row.metricValues[0]?.value || 0),
+          uniqueVisitors: parseInt(row.metricValues[1]?.value || 0),
+        };
+      }
+    });
+
+    res.json({ pages, configured: true });
+  } catch (error) {
+    console.error("article-pages GA error:", error.message);
+    res.json({ pages: {}, configured: true, error: error.message });
+  }
+});
+
 // Helper function to format date as YYYY-MM-DD
 function formatDate(date) {
   const year = date.getFullYear();

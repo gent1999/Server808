@@ -283,6 +283,54 @@ router.get("/index-status", auth, async (req, res) => {
   }
 });
 
+// @route   GET /api/search-console/article-pages
+// @desc    Bulk GSC data for all cry808.com/article/ pages — one request for the content library
+// @access  Private (Admin only)
+router.get("/article-pages", auth, async (req, res) => {
+  if (!searchConsole) return res.json({ pages: {}, configured: false });
+
+  const siteUrl = getSiteUrl(req);
+  if (!siteUrl) return res.json({ pages: {}, configured: false });
+
+  try {
+    const end   = new Date();
+    const start = new Date(); start.setDate(start.getDate() - 28);
+
+    const response = await searchConsole.searchanalytics.query({
+      siteUrl,
+      requestBody: {
+        startDate: formatDate(start),
+        endDate:   formatDate(end),
+        dimensions: ["page"],
+        rowLimit: 1000,
+      },
+    });
+
+    const pages = {};
+    (response.data.rows || []).forEach(row => {
+      // row.keys[0] is full URL: https://cry808.com/article/123-slug
+      const fullUrl = row.keys[0];
+      // Store both full URL and path so either can match
+      const path = fullUrl.replace(/^https?:\/\/[^/]+/, '');
+      if (path.startsWith('/article/')) {
+        const data = {
+          clicks:      Math.round(row.clicks      || 0),
+          impressions: Math.round(row.impressions || 0),
+          ctr:         Math.round((row.ctr        || 0) * 1000) / 10,
+          position:    Math.round((row.position   || 0) * 10)  / 10,
+        };
+        pages[path]    = data;
+        pages[fullUrl] = data;
+      }
+    });
+
+    res.json({ pages, configured: true });
+  } catch (error) {
+    console.error("article-pages GSC error:", error.message);
+    res.json({ pages: {}, configured: true, error: error.message });
+  }
+});
+
 // @route   GET /api/search-console/article/:slug
 // @desc    Get Search Console data for a specific article
 // @access  Private (Admin only)
