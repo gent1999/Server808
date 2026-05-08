@@ -384,7 +384,7 @@ router.get('/expenses', auth, async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT *, CASE WHEN renewal_date IS NOT NULL
-         THEN CEIL(EXTRACT(EPOCH FROM (renewal_date - CURRENT_DATE)) / 86400)
+         THEN (renewal_date - CURRENT_DATE)
          ELSE NULL END AS days_until_renewal
        FROM expenses ORDER BY renewal_date ASC NULLS LAST, created_at DESC`
     );
