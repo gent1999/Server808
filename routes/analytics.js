@@ -65,7 +65,8 @@ router.get("/visitors", auth, async (req, res) => {
           allTime: 0,
           average: 0,
           change: 0,
-          realtime: 0
+          realtime: 0,
+          monthly: []
         }
       });
     }
@@ -90,7 +91,8 @@ router.get("/visitors", auth, async (req, res) => {
           allTime: 0,
           average: 0,
           change: 0,
-          realtime: 0
+          realtime: 0,
+          monthly: []
         }
       });
     }
@@ -161,6 +163,14 @@ router.get("/visitors", auth, async (req, res) => {
       metrics: [
         { name: "activeUsers" },
       ],
+      orderBys: [
+        {
+          dimension: {
+            dimensionName: "yearMonth",
+          },
+        },
+      ],
+      limit: 120,
     });
 
     // Get realtime active users
@@ -178,6 +188,50 @@ router.get("/visitors", auth, async (req, res) => {
 
     // Calculate average monthly visitors
     let averageMonthly = 0;
+    const monthlyRows = (monthlyResponse.rows || [])
+      .map(row => {
+        const yearMonth = row.dimensionValues?.[0]?.value || "";
+        const year = yearMonth.slice(0, 4);
+        const month = yearMonth.slice(4, 6);
+        const date = year && month ? `${year}-${month}-01` : null;
+
+        return {
+          yearMonth,
+          date,
+          label: date
+            ? new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { month: "short", year: "2-digit" })
+            : yearMonth,
+          visitors: parseInt(row.metricValues?.[0]?.value || 0),
+        };
+      })
+      .filter(point => point.yearMonth)
+      .sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
+    const monthlyByKey = new Map(monthlyRows.map(point => [point.yearMonth, point]));
+    const firstMonth = monthlyRows[0]?.yearMonth;
+    const monthly = [];
+
+    if (firstMonth) {
+      const cursor = new Date(`${firstMonth.slice(0, 4)}-${firstMonth.slice(4, 6)}-01T00:00:00`);
+      const end = new Date(today.getFullYear(), today.getMonth(), 1);
+
+      while (cursor <= end) {
+        const year = cursor.getFullYear();
+        const month = String(cursor.getMonth() + 1).padStart(2, "0");
+        const yearMonth = `${year}${month}`;
+        const date = `${year}-${month}-01`;
+        const existing = monthlyByKey.get(yearMonth);
+
+        monthly.push(existing || {
+          yearMonth,
+          date,
+          label: cursor.toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+          visitors: 0,
+        });
+
+        cursor.setMonth(cursor.getMonth() + 1);
+      }
+    }
+
     if (monthlyResponse.rows && monthlyResponse.rows.length > 0) {
       const totalVisitors = monthlyResponse.rows.reduce((sum, row) => {
         return sum + parseInt(row.metricValues[0].value || 0);
@@ -198,7 +252,8 @@ router.get("/visitors", auth, async (req, res) => {
         allTime: allTimeVisitors,
         average: averageMonthly,
         change: Math.round(change * 10) / 10, // Round to 1 decimal
-        realtime: realtimeVisitors
+        realtime: realtimeVisitors,
+        monthly
       }
     });
   } catch (error) {
@@ -212,7 +267,8 @@ router.get("/visitors", auth, async (req, res) => {
         allTime: 0,
         average: 0,
         change: 0,
-        realtime: 0
+        realtime: 0,
+        monthly: []
       }
     });
   }
