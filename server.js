@@ -19,6 +19,8 @@ import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
 import geniusRoutes from "./routes/genius.js";
 import indexerRoutes from "./routes/indexer.js";
 import financeRoutes from "./routes/finance.js";
+import engineItemsRoutes from "./routes/engineItems.js";
+import cortexRoutes from "./routes/cortex.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -114,6 +116,12 @@ app.use("/api/indexer", authMiddleware, indexerRoutes);
 
 // Finance / Revenue Ops routes (protected - admin only)
 app.use("/api/finance", authMiddleware, financeRoutes);
+
+// Engine Items — CRUD + ideas + agent-events (accepts admin JWT or X-808-API-KEY)
+app.use("/api", engineItemsRoutes);
+
+// Cortex — status, summary, run trigger (mixed auth inside route)
+app.use("/api/cortex", cortexRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
