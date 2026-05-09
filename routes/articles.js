@@ -208,27 +208,18 @@ router.post(
       requestIndexing(articleUrl, process.env.INDEXNOW_KEY)
         .catch(err => console.error('IndexNow error:', err));
 
-      // Wake the 808engine Indexer — pass metadata so it can label the job correctly
-      const engineUrl = process.env.ENGINE_URL;
-      if (engineUrl) {
-        fetch(`${engineUrl}/api/indexer/wake`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(process.env.ENGINE_SECRET ? { 'x-engine-secret': process.env.ENGINE_SECRET } : {}),
-          },
-          body: JSON.stringify({
-            url:       articleUrl,
-            title:     title,
-            source:    'manual',
-            articleId: newArticle.id,
-          }),
-        })
-          .then(() => console.log('[Indexer] Woke 808engine for:', articleUrl))
-          .catch(err => console.error('[Indexer] Failed to wake agent:', err.message));
-      } else {
-        console.log('[Indexer] ENGINE_URL not set — add it to env to auto-trigger indexing');
-      }
+      // Queue indexing job for the local 808-engine to pick up via polling.
+      // ENGINE_URL push is unreliable (Vercel → localhost doesn't work),
+      // so we drop a pending engine_item that the local engine polls for.
+      pool.query(
+        `INSERT INTO engine_items (type, agent, status, title, article_id, priority, metadata)
+         VALUES ('event','indexer','pending',$1,$2,'high',$3)`,
+        [
+          `Index requested: ${title.slice(0, 80)}`,
+          newArticle.id,
+          JSON.stringify({ url: articleUrl, title, source: 'manual' }),
+        ]
+      ).catch(err => console.error('[Indexer] Failed to queue index event:', err.message));
 
       res.status(201).json({
         message: "Article created successfully",
