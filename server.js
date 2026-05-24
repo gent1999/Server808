@@ -72,10 +72,19 @@ const authLimiter = rateLimit({
   message: { message: 'Too many login attempts, please try again later.' },
 });
 
-// Form submission limiters (spam protection)
+// Newsletter: 3 signups per hour per IP (tight — no legit user signs up more than once)
+const newsletterLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many signup attempts, please try again later.' },
+});
+
+// Music submissions: 5 per hour per IP
 const formLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10,
+  windowMs: 60 * 60 * 1000,
+  max: 5,
   standardHeaders: true,
   legacyHeaders: false,
   message: { message: 'Submission limit reached, please try again later.' },
@@ -118,7 +127,7 @@ app.use("/api/articles", (req, res, next) => {
 }, articlesRoutes);
 
 // Newsletter routes (public subscribe, protected admin routes)
-app.use("/api/newsletter", formLimiter, (req, res, next) => {
+app.use("/api/newsletter", newsletterLimiter, (req, res, next) => {
   // Apply auth middleware only to GET /subscribers (admin viewing subscribers)
   if (req.path === '/subscribers' && req.method === 'GET') {
     return authMiddleware(req, res, next);
@@ -195,8 +204,8 @@ app.use("/api/overalls", overallsRoutes);
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
 
-// Genius lyrics scraper (public — rate-limited to prevent proxy abuse)
-app.use("/api/genius-lyrics", geniusLimiter, geniusRoutes);
+// Genius lyrics scraper — admin only, not a public endpoint
+app.use("/api/genius-lyrics", authMiddleware, geniusRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
