@@ -1,6 +1,7 @@
 // server.js - Updated for multi-site analytics support
 import express from "express";
 import cors from "cors";
+import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
 import articlesRoutes from "./routes/articles.js";
@@ -28,8 +29,69 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// ── CORS ─────────────────────────────────────────────────────────────────────
+// Only our own frontends are allowed to call this API from a browser.
+// Direct server-to-server calls (808-engine, curl) are unaffected by CORS.
+const ALLOWED_ORIGINS = [
+  'https://cry808.com',
+  'https://www.cry808.com',
+  'https://lowkeygrid.com',
+  'https://www.lowkeygrid.com',
+  // Allow localhost in dev
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:4173',
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (curl, Postman, server-to-server)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
+}));
+
+// ── Rate limiters ─────────────────────────────────────────────────────────────
+// General limiter — covers all routes not overridden below
+const generalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests, please try again later.' },
+});
+
+// Strict limiter for auth (brute-force protection)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many login attempts, please try again later.' },
+});
+
+// Form submission limiters (spam protection)
+const formLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Submission limit reached, please try again later.' },
+});
+
+// Genius lyrics — external scraper proxy, tighten to avoid abuse
+const geniusLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests.' },
+});
+
+app.use(generalLimiter);
+
 app.use(express.json());
 
 // Basic route (for testing)
@@ -38,7 +100,7 @@ app.get("/", (req, res) => {
 });
 
 // Auth routes (public routes like login, register)
-app.use("/api/auth", (req, res, next) => {
+app.use("/api/auth", authLimiter, (req, res, next) => {
   // Apply auth middleware only to specific routes
   if (req.path === '/delete-account') {
     return authMiddleware(req, res, next);
@@ -56,7 +118,7 @@ app.use("/api/articles", (req, res, next) => {
 }, articlesRoutes);
 
 // Newsletter routes (public subscribe, protected admin routes)
-app.use("/api/newsletter", (req, res, next) => {
+app.use("/api/newsletter", formLimiter, (req, res, next) => {
   // Apply auth middleware only to GET /subscribers (admin viewing subscribers)
   if (req.path === '/subscribers' && req.method === 'GET') {
     return authMiddleware(req, res, next);
@@ -68,7 +130,7 @@ app.use("/api/newsletter", (req, res, next) => {
 app.use("/api/featured", authMiddleware, featuredRoutes);
 
 // Submissions routes (public for submitting, protected for admin actions)
-app.use("/api/submissions", (req, res, next) => {
+app.use("/api/submissions", formLimiter, (req, res, next) => {
   // Apply auth middleware to admin-only routes
   const adminPaths = ['/publish', '/status'];
   const isAdminRoute = adminPaths.some(path => req.path.includes(path));
@@ -133,8 +195,8 @@ app.use("/api/overalls", overallsRoutes);
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
 
-// Genius lyrics scraper (public)
-app.use("/api/genius-lyrics", geniusRoutes);
+// Genius lyrics scraper (public — rate-limited to prevent proxy abuse)
+app.use("/api/genius-lyrics", geniusLimiter, geniusRoutes);
 
 // Protected route example
 app.get("/api/admin/dashboard", authMiddleware, (req, res) => {
