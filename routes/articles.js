@@ -251,33 +251,34 @@ router.get("/", async (req, res) => {
   }
 });
 
-// @route   GET /api/articles/featured
-// @desc    Get featured article
+// @route   GET /api/articles/featured/article
+// @desc    Get all featured articles for carousel (up to 5), falls back to 3 latest
 // @access  Public
 router.get("/featured/article", async (req, res) => {
   try {
+    const cols = "id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at";
+
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') LIMIT 1"
+      `SELECT ${cols} FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') ORDER BY updated_at DESC LIMIT 5`
     );
 
-    // If no featured article, return the latest one
+    // If no featured articles, fall back to 3 most recent
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 1"
+        `SELECT ${cols} FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 3`
       );
-
       return res.json({
-        article: latestResult.rows[0] || null,
+        articles: latestResult.rows,
         isFallback: true
       });
     }
 
     res.json({
-      article: result.rows[0],
+      articles: result.rows,
       isFallback: false
     });
   } catch (error) {
-    console.error('Error fetching featured article:', error.message);
+    console.error('Error fetching featured articles:', error.message);
     res.status(500).json({ message: "Server error" });
   }
 });
