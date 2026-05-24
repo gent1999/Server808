@@ -7,8 +7,14 @@ import { Readable } from "stream";
 import auth from "../middleware/auth.js";
 import { pingSitemap, requestIndexing } from "../utils/sitemapPing.js";
 import fetch from "node-fetch";
+import { getCached, setCached, bustCache } from "../utils/cache.js";
 
 const router = express.Router();
+
+// Cache keys & TTLs
+const ARTICLES_KEY         = 'articles:all';
+const ARTICLES_FEATURED    = 'articles:featured';
+const ARTICLES_TTL         = 60;  // 1 minute — list rarely changes between refreshes
 
 // ── Article indexing schema migration (runs on every boot, safe with IF NOT EXISTS) ──
 pool.query(`
@@ -221,6 +227,7 @@ router.post(
         ]
       ).catch(err => console.error('[Indexer] Failed to queue index event:', err.message));
 
+      bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
       res.status(201).json({
         message: "Article created successfully",
         article: newArticle
@@ -236,15 +243,17 @@ router.post(
 // @desc    Get all articles
 // @access  Public
 router.get("/", async (req, res) => {
+  const cached = getCached(ARTICLES_KEY);
+  if (cached) return res.json(cached);
+
   try {
     const result = await pool.query(
       "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC"
     );
 
-    res.json({
-      articles: result.rows,
-      count: result.rows.length
-    });
+    const payload = { articles: result.rows, count: result.rows.length };
+    setCached(ARTICLES_KEY, payload, ARTICLES_TTL);
+    res.json(payload);
   } catch (error) {
     console.error('Error fetching articles:', error.message);
     res.status(500).json({ message: "Server error" });
@@ -255,6 +264,9 @@ router.get("/", async (req, res) => {
 // @desc    Get all featured articles for carousel (up to 5), falls back to 3 latest
 // @access  Public
 router.get("/featured/article", async (req, res) => {
+  const cached = getCached(ARTICLES_FEATURED);
+  if (cached) return res.json(cached);
+
   try {
     const cols = "id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at";
 
@@ -262,21 +274,19 @@ router.get("/featured/article", async (req, res) => {
       `SELECT ${cols} FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') ORDER BY updated_at DESC LIMIT 5`
     );
 
+    let payload;
     // If no featured articles, fall back to 3 most recent
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
         `SELECT ${cols} FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 3`
       );
-      return res.json({
-        articles: latestResult.rows,
-        isFallback: true
-      });
+      payload = { articles: latestResult.rows, isFallback: true };
+    } else {
+      payload = { articles: result.rows, isFallback: false };
     }
 
-    res.json({
-      articles: result.rows,
-      isFallback: false
-    });
+    setCached(ARTICLES_FEATURED, payload, ARTICLES_TTL);
+    res.json(payload);
   } catch (error) {
     console.error('Error fetching featured articles:', error.message);
     res.status(500).json({ message: "Server error" });
@@ -502,6 +512,7 @@ router.put(
       // Notify search engines about the updated article
       pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
+      bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
       res.json({
         message: "Article updated successfully",
         article: result.rows[0]
@@ -572,6 +583,7 @@ router.delete("/:id", auth, async (req, res) => {
     // Notify search engines about the deleted article
     pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
+    bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
     res.json({
       message: "Article deleted successfully",
       article: result.rows[0]

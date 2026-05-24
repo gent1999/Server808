@@ -1,8 +1,12 @@
 import express from "express";
 import pool from "../config/db.js";
 import auth from "../middleware/auth.js";
+import { getCached, setCached, bustCache } from "../utils/cache.js";
 
 const router = express.Router();
+
+const SETTINGS_PUBLIC_KEY = 'settings:public';
+const SETTINGS_PUBLIC_TTL = 120; // 2 minutes — ad settings rarely change
 
 // @route   GET /api/admin/settings
 // @desc    Get all settings
@@ -53,6 +57,9 @@ router.put("/", auth, async (req, res) => {
 
       await client.query('COMMIT');
 
+      // Bust public settings cache so next page load gets fresh data
+      bustCache(SETTINGS_PUBLIC_KEY);
+
       res.json({
         message: "Settings updated successfully",
         settings
@@ -69,10 +76,14 @@ router.put("/", auth, async (req, res) => {
   }
 });
 
-// @route   GET /api/settings
+// @route   GET /api/settings/public
 // @desc    Get public settings (for frontend config)
 // @access  Public
 router.get("/public", async (req, res) => {
+  // Serve from cache — this is called on every page load
+  const cached = getCached(SETTINGS_PUBLIC_KEY);
+  if (cached) return res.json(cached);
+
   try {
     const result = await pool.query(
       "SELECT key, value FROM settings WHERE key IN ('adsterra_enabled', 'adsterra_home_desktop_enabled', 'adsterra_home_mobile_enabled', 'hilltop_enabled', 'monetag_enabled', 'beatport_banner_enabled', 'beatport_banner_url', 'beatport_banner_image_url', 'beatport_home_desktop_enabled', 'beatport_home_mobile_enabled', 'beatport_article_desktop_enabled', 'beatport_article_bottom_enabled', 'adsterra_order', 'beatport_sidebar_order', 'spotify_order', 'amazon_order', 'hilltop_article_order', 'amazon_article_order', 'spotify_article_order', 'spotify_home_url', 'spotify_home_title', 'spotify_article_url', 'spotify_article_title', 'lowkeygrid_spotify_home_url', 'lowkeygrid_spotify_home_title')"
@@ -84,11 +95,14 @@ router.get("/public", async (req, res) => {
       settings[row.key] = row.value;
     });
 
-    res.json({ settings });
+    const payload = { settings };
+    setCached(SETTINGS_PUBLIC_KEY, payload, SETTINGS_PUBLIC_TTL);
+    res.json(payload);
   } catch (error) {
     console.error("Error fetching public settings:", error);
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 export default router;
