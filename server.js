@@ -22,6 +22,7 @@ import indexerRoutes from "./routes/indexer.js";
 import financeRoutes from "./routes/finance.js";
 import engineItemsRoutes from "./routes/engineItems.js";
 import cortexRoutes from "./routes/cortex.js";
+import neonRoutes from "./routes/neon.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -193,6 +194,9 @@ app.use("/api", engineItemsRoutes);
 
 // Cortex — status, summary, run trigger (mixed auth inside route)
 app.use("/api/cortex", cortexRoutes);
+
+// Neon DB usage stats (admin only)
+app.use("/api/neon", neonRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
