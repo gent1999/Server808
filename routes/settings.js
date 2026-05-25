@@ -86,7 +86,7 @@ router.get("/public", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT key, value FROM settings WHERE key IN ('adsterra_enabled', 'adsterra_home_desktop_enabled', 'adsterra_home_mobile_enabled', 'hilltop_enabled', 'monetag_enabled', 'beatport_banner_enabled', 'beatport_banner_url', 'beatport_banner_image_url', 'beatport_home_desktop_enabled', 'beatport_home_mobile_enabled', 'beatport_article_desktop_enabled', 'beatport_article_bottom_enabled', 'adsterra_order', 'beatport_sidebar_order', 'spotify_order', 'amazon_order', 'hilltop_article_order', 'amazon_article_order', 'spotify_article_order', 'spotify_home_url', 'spotify_home_title', 'spotify_article_url', 'spotify_article_title', 'lowkeygrid_spotify_home_url', 'lowkeygrid_spotify_home_title')"
+      "SELECT key, value FROM settings WHERE key IN ('adsterra_enabled', 'adsterra_home_desktop_enabled', 'adsterra_home_mobile_enabled', 'hilltop_enabled', 'monetag_enabled', 'beatport_banner_enabled', 'beatport_banner_url', 'beatport_banner_image_url', 'beatport_home_desktop_enabled', 'beatport_home_mobile_enabled', 'beatport_article_desktop_enabled', 'beatport_article_bottom_enabled', 'amazon_home_enabled', 'amazon_article_enabled', 'adsterra_order', 'beatport_sidebar_order', 'spotify_order', 'amazon_order', 'hilltop_article_order', 'amazon_article_order', 'spotify_article_order', 'spotify_home_url', 'spotify_home_title', 'spotify_article_url', 'spotify_article_title', 'lowkeygrid_spotify_home_url', 'lowkeygrid_spotify_home_title')"
     );
 
     // Convert rows to object format
