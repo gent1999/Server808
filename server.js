@@ -45,7 +45,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4173',
 ];
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (curl, Postman, server-to-server)
     if (!origin) return callback(null, true);
@@ -53,7 +53,16 @@ app.use(cors({
     callback(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-808-API-KEY'],
+};
+
+app.use(cors(corsOptions));
+
+// Explicitly handle all OPTIONS preflight requests.
+// The cors package requires this separate call for non-simple requests
+// (i.e. requests that carry Authorization or Content-Type: multipart/form-data).
+app.options('*', cors(corsOptions));
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General limiter — covers all routes not overridden below
