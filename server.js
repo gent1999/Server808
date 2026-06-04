@@ -128,13 +128,14 @@ app.use("/api/articles", (req, res, next) => {
   next();
 }, articlesRoutes);
 
-// Newsletter routes (public subscribe, protected admin routes)
-app.use("/api/newsletter", newsletterLimiter, (req, res, next) => {
-  // Apply auth middleware only to GET /subscribers (admin viewing subscribers)
-  if (req.path === '/subscribers' && req.method === 'GET') {
-    return authMiddleware(req, res, next);
-  }
-  next();
+// Newsletter routes
+// - /subscribe is rate-limited (3/hr per IP — anti-abuse)
+// - Admin routes (upload-cover, send, sends, subscribers) are NOT rate-limited
+app.use("/api/newsletter", (req, res, next) => {
+  const adminPaths = ['/upload-cover', '/send', '/sends', '/subscribers', '/unsubscribe'];
+  const isAdminPath = adminPaths.some(p => req.path.startsWith(p));
+  if (isAdminPath) return next(); // skip rate limiter for admin routes
+  return newsletterLimiter(req, res, next);
 }, newsletterRoutes);
 
 // Featured article routes (protected)

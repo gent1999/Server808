@@ -41,8 +41,15 @@ pool.query(`
   )
 `).catch(console.error);
 
-// ── Resend client ─────────────────────────────────────────────────────────────
-const resend = new Resend(process.env.RESEND_API_KEY);
+// ── Resend client (lazy init so a missing key doesn't crash the server) ───────
+let _resend = null;
+const getResend = () => {
+  if (!_resend) {
+    if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not set');
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
+};
 
 // ── HTML email template ───────────────────────────────────────────────────────
 const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => {
@@ -200,7 +207,7 @@ router.post("/send", authMiddleware, async (req, res) => {
         const unsubUrl = `https://cry808.com/api/newsletter/unsubscribe?email=${encodeURIComponent(email)}`;
         const unsubMailto = `mailto:${fromAddress}?subject=Unsubscribe%20${encodeURIComponent(email)}`;
 
-        const { error: sendError } = await resend.emails.send({
+        const { error: sendError } = await getResend().emails.send({
           from: fromName,
           to: email,
           subject,
