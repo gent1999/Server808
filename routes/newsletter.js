@@ -52,7 +52,9 @@ const makeTransporter = () =>
   });
 
 // ── HTML email template ───────────────────────────────────────────────────────
-const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => `
+const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => {
+  const unsubUrl = `https://cry808.com/api/newsletter/unsubscribe?email=${encodeURIComponent(recipientEmail)}`;
+  return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -117,12 +119,12 @@ const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => `
           <!-- Footer -->
           <tr>
             <td style="padding:20px 32px;text-align:center;">
-              <p style="margin:0 0 10px;color:#3a3a3a;font-size:11px;line-height:1.6;">
-                You're receiving this email because you subscribed to Cry808 updates.
+              <p style="margin:0 0 10px;color:#777;font-size:11px;line-height:1.6;">
+                You're receiving this because you subscribed at cry808.com.
               </p>
               <a
-                href="https://cry808.com/unsubscribe?email=${encodeURIComponent(recipientEmail)}"
-                style="color:#444;font-size:11px;text-decoration:underline;"
+                href="${unsubUrl}"
+                style="color:#888;font-size:11px;text-decoration:underline;"
               >
                 Unsubscribe
               </a>
@@ -135,6 +137,28 @@ const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => `
   </table>
 </body>
 </html>`;
+};
+
+// ── Plain-text fallback (required for good deliverability) ────────────────────
+const buildEmailText = ({ subject, introText, imageUrl, recipientEmail }) => {
+  const unsubUrl = `https://cry808.com/api/newsletter/unsubscribe?email=${encodeURIComponent(recipientEmail)}`;
+  return [
+    'CRY808 — Hip-Hop News & Culture',
+    '================================',
+    '',
+    subject,
+    '',
+    introText ? introText + '\n' : '',
+    'View the full issue online:',
+    imageUrl,
+    '',
+    '--------------------------------',
+    'Read more: https://cry808.com',
+    '',
+    "You're receiving this because you subscribed at cry808.com.",
+    `Unsubscribe: ${unsubUrl}`,
+  ].join('\n');
+};
 
 // ── POST /api/newsletter/upload-cover  — admin, upload cover to Cloudinary ────
 router.post("/upload-cover", authMiddleware, upload.single("image"), async (req, res) => {
@@ -180,19 +204,39 @@ router.post("/send", authMiddleware, async (req, res) => {
 
     for (const { email } of recipients) {
       try {
+        const unsubUrl = `https://cry808.com/api/newsletter/unsubscribe?email=${encodeURIComponent(email)}`;
+        const unsubMailto = `mailto:${process.env.EMAIL_USER}?subject=Unsubscribe%20${encodeURIComponent(email)}`;
+
         await transporter.sendMail({
           from: fromName,
           to: email,
           subject,
+          // Plain-text version — required for good deliverability
+          text: buildEmailText({
+            subject,
+            introText: intro_text?.trim() || "",
+            imageUrl: image_url,
+            recipientEmail: email,
+          }),
           html: buildEmailHtml({
             subject,
             introText: intro_text?.trim() || "",
             imageUrl: image_url,
             recipientEmail: email,
           }),
+          headers: {
+            // RFC 2369 — required by Gmail/Yahoo bulk sender policy (Feb 2024)
+            'List-Unsubscribe': `<${unsubUrl}>, <${unsubMailto}>`,
+            // RFC 8058 — one-click unsubscribe (Gmail shows "Unsubscribe" button)
+            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+            // Signal bulk mail to MTAs
+            'Precedence': 'bulk',
+            // Prevent auto-responses
+            'X-Auto-Response-Suppress': 'OOF, AutoReply',
+          },
         });
         sent++;
-        // Small delay to respect Gmail's rate limits
+        // Throttle: ~8 emails/sec to stay within Gmail's limits
         if (recipients.length > 1) await new Promise(r => setTimeout(r, 120));
       } catch (e) {
         errors.push({ email, error: e.message });
@@ -287,7 +331,7 @@ router.get("/subscribers", authMiddleware, async (req, res) => {
   }
 });
 
-// ── GET /api/newsletter/unsubscribe  — public, via email link ─────────────────
+// ── GET /api/newsletter/unsubscribe  — public, via email link click ───────────
 router.get("/unsubscribe", async (req, res) => {
   const { email } = req.query;
   if (!email) return res.status(400).json({ message: "Email required" });
@@ -295,8 +339,22 @@ router.get("/unsubscribe", async (req, res) => {
     await pool.query(
       "UPDATE newsletter_subscribers SET is_active = false WHERE email = $1", [email]
     );
-    // Redirect to frontend unsubscribe confirmation page
     res.redirect(`https://cry808.com/unsubscribe?email=${encodeURIComponent(email)}&done=1`);
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /api/newsletter/unsubscribe  — RFC 8058 one-click (Gmail uses this) ──
+router.post("/unsubscribe", async (req, res) => {
+  // Gmail sends: List-Unsubscribe=One-Click in the POST body
+  const email = req.query.email || req.body?.email;
+  if (!email) return res.status(400).json({ message: "Email required" });
+  try {
+    await pool.query(
+      "UPDATE newsletter_subscribers SET is_active = false WHERE email = $1", [email]
+    );
+    res.status(200).json({ message: "Unsubscribed" });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }
