@@ -59,10 +59,9 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
-// Explicitly handle all OPTIONS preflight requests.
-// The cors package requires this separate call for non-simple requests
-// (i.e. requests that carry Authorization or Content-Type: multipart/form-data).
-app.options('*', cors(corsOptions));
+// app.use(cors) already auto-handles OPTIONS preflight (responds 204 before
+// reaching any route). Express 5 does NOT accept bare '*' as a path, so we
+// do NOT add a separate app.options('*', ...) call here.
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General limiter — covers all routes not overridden below
