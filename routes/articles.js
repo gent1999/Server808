@@ -16,7 +16,7 @@ const ARTICLES_KEY         = 'articles:all';
 const ARTICLES_FEATURED    = 'articles:featured';
 const ARTICLES_TTL         = 60;  // 1 minute — list rarely changes between refreshes
 
-// ── Article indexing schema migration (runs on every boot, safe with IF NOT EXISTS) ──
+// ── Article indexing + categories schema migration (runs on every boot, safe with IF NOT EXISTS) ──
 pool.query(`
   ALTER TABLE articles
     ADD COLUMN IF NOT EXISTS article_url               TEXT,
@@ -27,7 +27,8 @@ pool.query(`
     ADD COLUMN IF NOT EXISTS last_index_requested_at   TIMESTAMP,
     ADD COLUMN IF NOT EXISTS indexed_detected_at       TIMESTAMP,
     ADD COLUMN IF NOT EXISTS last_index_status         VARCHAR(30),
-    ADD COLUMN IF NOT EXISTS last_index_error          TEXT
+    ADD COLUMN IF NOT EXISTS last_index_error          TEXT,
+    ADD COLUMN IF NOT EXISTS categories                TEXT[] DEFAULT '{}'
 `).then(() =>
   // Backfill article_url for any existing articles that don't have it yet.
   // Replicates the same slug logic used in the POST /api/articles handler.
@@ -109,7 +110,7 @@ router.post(
       return res.status(400).json({ errors: errors.array() });
     }
 
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, image_url, is_original, is_evergreen } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, categories: categoriesRaw, image_url, is_original, is_evergreen } = req.body;
 
     try {
       let imageUrl = image_url || null; // Use provided URL if exists
@@ -172,12 +173,25 @@ router.post(
         }
       }
 
+      // Parse categories array (JSON string from FormData)
+      let categoriesArray = [];
+      if (categoriesRaw) {
+        if (typeof categoriesRaw === 'string') {
+          try { categoriesArray = JSON.parse(categoriesRaw); } catch { categoriesArray = [categoriesRaw]; }
+        } else if (Array.isArray(categoriesRaw)) {
+          categoriesArray = categoriesRaw;
+        }
+      }
+      // Fall back to legacy single category field
+      if (categoriesArray.length === 0 && category) categoriesArray = [category];
+      const primaryCategory = categoriesArray[0] || category || 'article';
+
       // Insert article into database with all images
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, categories, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
          RETURNING *`,
-        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || 'article', is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
+        [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, primaryCategory, categoriesArray, is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
       );
 
       const newArticle = result.rows[0];
@@ -248,7 +262,7 @@ router.get("/", async (req, res) => {
 
   try {
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC"
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, categories, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE site = 'cry808' ORDER BY created_at DESC"
     );
 
     const payload = { articles: result.rows, count: result.rows.length };
@@ -268,17 +282,17 @@ router.get("/featured/article", async (req, res) => {
   if (cached) return res.json(cached);
 
   try {
-    const cols = "id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at";
+    const cols = "id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, categories, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at";
 
     const result = await pool.query(
-      `SELECT ${cols} FROM articles WHERE is_featured = true AND site = 'cry808' AND category IN ('article', 'interview') ORDER BY updated_at DESC LIMIT 5`
+      `SELECT ${cols} FROM articles WHERE is_featured = true AND site = 'cry808' ORDER BY updated_at DESC LIMIT 5`
     );
 
     let payload;
     // If no featured articles, fall back to 3 most recent
     if (result.rows.length === 0) {
       const latestResult = await pool.query(
-        `SELECT ${cols} FROM articles WHERE site = 'cry808' AND category IN ('article', 'interview') ORDER BY created_at DESC LIMIT 3`
+        `SELECT ${cols} FROM articles WHERE site = 'cry808' ORDER BY created_at DESC LIMIT 3`
       );
       payload = { articles: latestResult.rows, isFallback: true };
     } else {
@@ -348,7 +362,7 @@ router.get("/:id", async (req, res) => {
     const { id } = req.params;
 
     const result = await pool.query(
-      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1 AND site = 'cry808' AND category IN ('article', 'interview')",
+      "SELECT id, title, author, content, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, tags, category, categories, is_featured, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, created_at, updated_at FROM articles WHERE id = $1 AND site = 'cry808'",
       [id]
     );
 
@@ -384,7 +398,7 @@ router.put(
     }
 
     const { id } = req.params;
-    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, is_original, is_evergreen, remove_additional_image_1, remove_additional_image_2, remove_additional_image_3 } = req.body;
+    const { title, author, content, tags, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, categories: categoriesRaw, is_original, is_evergreen, remove_additional_image_1, remove_additional_image_2, remove_additional_image_3 } = req.body;
 
     try {
       // Check if article exists
@@ -452,6 +466,18 @@ router.put(
         }
       }
 
+      // Parse categories array (JSON string from FormData)
+      let categoriesArray = null;
+      if (categoriesRaw) {
+        if (typeof categoriesRaw === 'string') {
+          try { categoriesArray = JSON.parse(categoriesRaw); } catch { categoriesArray = [categoriesRaw]; }
+        } else if (Array.isArray(categoriesRaw)) {
+          categoriesArray = categoriesRaw;
+        }
+      }
+      // Derive primary category from categories array (for backwards compat)
+      const primaryCategory = categoriesArray && categoriesArray.length > 0 ? categoriesArray[0] : (category || null);
+
       // Parse is_original - DEBUG
       console.log('Received is_original:', is_original, 'Type:', typeof is_original);
 
@@ -501,10 +527,11 @@ router.put(
              additional_image_1 = $14,
              additional_image_2 = $15,
              additional_image_3 = $16,
+             categories = COALESCE($18, categories),
              updated_at = CURRENT_TIMESTAMP
          WHERE id = $17
          RETURNING *`,
-        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, category || null, isOriginalValue, isEvergreenValue, finalAdditionalImage1, finalAdditionalImage2, finalAdditionalImage3, id]
+        [title || null, author || null, content || null, tagsArray.length > 0 ? tagsArray : null, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, primaryCategory || null, isOriginalValue, isEvergreenValue, finalAdditionalImage1, finalAdditionalImage2, finalAdditionalImage3, id, categoriesArray]
       );
 
       console.log('Updated is_original to:', result.rows[0].is_original);
