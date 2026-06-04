@@ -1,6 +1,6 @@
 import express from "express";
 import { body, validationResult } from "express-validator";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import pool from "../config/db.js";
 import authMiddleware from "../middleware/auth.js";
 import multer from "multer";
@@ -41,15 +41,8 @@ pool.query(`
   )
 `).catch(console.error);
 
-// ── Gmail transporter ─────────────────────────────────────────────────────────
-const makeTransporter = () =>
-  nodemailer.createTransport({
-    service: "gmail",
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
+// ── Resend client ─────────────────────────────────────────────────────────────
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ── HTML email template ───────────────────────────────────────────────────────
 const buildEmailHtml = ({ subject, introText, imageUrl, recipientEmail }) => {
@@ -196,8 +189,8 @@ router.post("/send", authMiddleware, async (req, res) => {
       return res.status(400).json({ message: "No active subscribers to send to" });
     }
 
-    const transporter = makeTransporter();
-    const fromName = `Cry808 Newsletter <${process.env.EMAIL_USER}>`;
+    const fromAddress = process.env.RESEND_FROM_EMAIL || "newsletter@cry808.com";
+    const fromName = `Cry808 Newsletter <${fromAddress}>`;
 
     let sent = 0;
     const errors = [];
@@ -205,13 +198,12 @@ router.post("/send", authMiddleware, async (req, res) => {
     for (const { email } of recipients) {
       try {
         const unsubUrl = `https://cry808.com/api/newsletter/unsubscribe?email=${encodeURIComponent(email)}`;
-        const unsubMailto = `mailto:${process.env.EMAIL_USER}?subject=Unsubscribe%20${encodeURIComponent(email)}`;
+        const unsubMailto = `mailto:${fromAddress}?subject=Unsubscribe%20${encodeURIComponent(email)}`;
 
-        await transporter.sendMail({
+        const { error: sendError } = await resend.emails.send({
           from: fromName,
           to: email,
           subject,
-          // Plain-text version — required for good deliverability
           text: buildEmailText({
             subject,
             introText: intro_text?.trim() || "",
@@ -225,19 +217,17 @@ router.post("/send", authMiddleware, async (req, res) => {
             recipientEmail: email,
           }),
           headers: {
-            // RFC 2369 — required by Gmail/Yahoo bulk sender policy (Feb 2024)
-            'List-Unsubscribe': `<${unsubUrl}>, <${unsubMailto}>`,
-            // RFC 8058 — one-click unsubscribe (Gmail shows "Unsubscribe" button)
-            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-            // Signal bulk mail to MTAs
-            'Precedence': 'bulk',
-            // Prevent auto-responses
-            'X-Auto-Response-Suppress': 'OOF, AutoReply',
+            "List-Unsubscribe": `<${unsubUrl}>, <${unsubMailto}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            "Precedence": "bulk",
+            "X-Auto-Response-Suppress": "OOF, AutoReply",
           },
         });
+
+        if (sendError) throw new Error(sendError.message);
         sent++;
-        // Throttle: ~8 emails/sec to stay within Gmail's limits
-        if (recipients.length > 1) await new Promise(r => setTimeout(r, 120));
+        // Small delay between sends
+        if (recipients.length > 1) await new Promise(r => setTimeout(r, 100));
       } catch (e) {
         errors.push({ email, error: e.message });
         console.error(`Failed to send to ${email}:`, e.message);
