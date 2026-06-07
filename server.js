@@ -1,6 +1,5 @@
 // server.js - Updated for multi-site analytics support
 import express from "express";
-import cors from "cors";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
@@ -45,23 +44,31 @@ const ALLOWED_ORIGINS = [
   'http://localhost:4173',
 ];
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow requests with no origin (curl, Postman, server-to-server)
-    if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
-    callback(new Error(`CORS: origin ${origin} not allowed`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-808-API-KEY'],
-};
+// ── Manual CORS middleware ────────────────────────────────────────────────────
+// The cors npm package has subtle incompatibilities with Express 5's response
+// chain, so we handle CORS entirely by hand. This gives us full control over
+// both preflight (OPTIONS) and normal requests.
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
 
-app.use(cors(corsOptions));
+  // Reflect the origin back only if it is explicitly allowed.
+  // Never echo an origin that isn't on the list.
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');                // required for correct CDN caching
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,X-808-API-KEY');
+    res.setHeader('Access-Control-Max-Age', '86400'); // 24 h preflight cache
+  }
 
-// app.use(cors) already auto-handles OPTIONS preflight (responds 204 before
-// reaching any route). Express 5 does NOT accept bare '*' as a path, so we
-// do NOT add a separate app.options('*', ...) call here.
+  // Respond immediately to OPTIONS preflight — no further middleware needed.
+  if (req.method === 'OPTIONS') {
+    return res.status(204).end();
+  }
+
+  next();
+});
 
 // ── Rate limiters ─────────────────────────────────────────────────────────────
 // General limiter — covers all routes not overridden below
