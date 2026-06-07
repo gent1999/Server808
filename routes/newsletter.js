@@ -3,30 +3,9 @@ import { body, validationResult } from "express-validator";
 import { Resend } from "resend";
 import pool from "../config/db.js";
 import authMiddleware from "../middleware/auth.js";
-import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
 
 const router = express.Router();
-
-// ── Multer + Cloudinary for cover image uploads ───────────────────────────────
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
-  fileFilter: (req, file, cb) =>
-    file.mimetype.startsWith("image/")
-      ? cb(null, true)
-      : cb(new Error("Only image files are allowed"), false),
-});
-
-const uploadToCloudinary = (buffer, folder = "newsletter_covers") =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: "auto" },
-      (err, result) => (err ? reject(err) : resolve(result))
-    );
-    Readable.from(buffer).pipe(stream);
-  });
 
 // ── Auto-create sends history table ──────────────────────────────────────────
 pool.query(`
@@ -160,12 +139,24 @@ const buildEmailText = ({ subject, introText, imageUrl, recipientEmail }) => {
   ].join('\n');
 };
 
-// ── POST /api/newsletter/upload-cover  — admin, upload cover to Cloudinary ────
-router.post("/upload-cover", authMiddleware, upload.single("image"), async (req, res) => {
+// ── GET /api/newsletter/upload-params  — admin, returns Cloudinary signing params ──
+// The browser uses these to upload the image DIRECTLY to Cloudinary, bypassing
+// the server entirely (no body-size limit, no Vercel timeout, no CORS on upload).
+router.get("/upload-params", authMiddleware, (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "No image provided" });
-    const result = await uploadToCloudinary(req.file.buffer);
-    res.json({ image_url: result.secure_url });
+    const timestamp = Math.round(Date.now() / 1000);
+    const folder    = "newsletter_covers";
+    const signature = cloudinary.utils.api_sign_request(
+      { timestamp, folder },
+      process.env.CLOUDINARY_API_SECRET
+    );
+    res.json({
+      cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+      api_key:    process.env.CLOUDINARY_API_KEY,
+      timestamp,
+      folder,
+      signature,
+    });
   } catch (e) {
     res.status(500).json({ message: e.message });
   }
