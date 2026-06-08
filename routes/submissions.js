@@ -18,42 +18,102 @@ const upload = multer({
   fileFilter: (req, file, cb) => {
     if (file.fieldname === 'image' && file.mimetype.startsWith('image/')) return cb(null, true);
     if (file.fieldname === 'document') {
-      const allowed = ['text/plain','application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      const allowed = [
+        'text/plain','application/pdf','application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      ];
       return allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Only txt, doc, docx, pdf allowed'), false);
     }
     cb(new Error('Invalid file type'), false);
   },
 });
 
-// ── Cloudinary helper ──────────────────────────────────────────────────────────
-const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream({ folder, resource_type: resourceType }, (err, result) => {
-      err ? reject(err) : resolve(result);
-    });
-    Readable.from(buffer).pipe(stream);
-  });
-
-// ── Shared fields for the full submit ─────────────────────────────────────────
-const FULL_SUBMIT_FIELDS = upload.fields([
+const UPLOAD_FIELDS = upload.fields([
   { name: 'image',    maxCount: 1 },
   { name: 'document', maxCount: 1 },
 ]);
 
-// ── All valid submission types ─────────────────────────────────────────────────
-const ALL_TYPES    = ['free', 'regular', 'priority', 'featured', 'genius'];
-const PAID_TYPES   = ['regular', 'priority', 'featured', 'genius'];
+// ── Cloudinary helper ──────────────────────────────────────────────────────────
+const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: resourceType },
+      (err, result) => (err ? reject(err) : resolve(result))
+    );
+    Readable.from(buffer).pipe(stream);
+  });
 
-// ── Pricing map ────────────────────────────────────────────────────────────────
+// ── Pricing ────────────────────────────────────────────────────────────────────
+const PAID_TYPES = ['regular', 'priority', 'featured', 'genius'];
+
 function getAmount(type) {
-  if (type === 'featured') return 700; // legacy $7
+  if (type === 'featured') return 700;  // legacy $7
   if (type === 'genius')   return 1000; // $10
-  return 500; // regular / priority → $5
+  return 500;                           // regular / priority → $5
 }
 
-// @route   POST /api/submissions/create-payment-intent
-// @desc    Create Stripe payment intent for paid submissions
-// @access  Public
+// ── Safe INSERT: tries new schema, falls back to old schema on any constraint error ──
+// This lets the endpoint work before the migration is run, and fully after.
+async function safeInsert(fields) {
+  const {
+    artist_name, email, title, content,
+    youtube_url, spotify_url, soundcloud_url,
+    apple_music_url, instagram_url, genre,
+    image_url, document_url,
+    genius_song_url, genius_lyrics,
+    submission_type, payment_amount, payment_id, payment_status,
+  } = fields;
+
+  // ── Attempt 1: full new-schema INSERT ────────────────────────────────────────
+  try {
+    return await pool.query(
+      `INSERT INTO music_submissions
+         (artist_name, email, title, content,
+          youtube_url, spotify_url, soundcloud_url,
+          apple_music_url, instagram_url, genre,
+          image_url, document_url, genius_song_url, genius_lyrics,
+          submission_type, payment_amount, payment_id, payment_status, submission_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
+       RETURNING id, artist_name, email, title, submission_type, created_at`,
+      [
+        artist_name, email, title||null, content||null,
+        youtube_url||null, spotify_url||null, soundcloud_url||null,
+        apple_music_url||null, instagram_url||null, genre||null,
+        image_url||null, document_url||null, genius_song_url||null, genius_lyrics||null,
+        submission_type, payment_amount, payment_id||null, payment_status,
+      ]
+    );
+  } catch (err) {
+    // 42703 = undefined column  |  23514 = check constraint  |  23502 = not_null_violation
+    if (!['42703','23514','23502'].includes(err.code)) throw err;
+
+    console.warn(`[submissions] Pre-migration fallback (${err.code}). Run: node run-migration.js add-submission-fields.sql`);
+  }
+
+  // ── Attempt 2: original schema only (pre-migration) ──────────────────────────
+  // Normalize submission_type to what the old CHECK constraint accepts
+  const legacyType = ['regular','featured'].includes(submission_type) ? submission_type : 'regular';
+  // payment_id is NOT NULL in the old schema — use a sentinel for free subs
+  const legacyPaymentId = payment_id || `FREE-${Date.now()}`;
+
+  return await pool.query(
+    `INSERT INTO music_submissions
+       (artist_name, email, title, content,
+        youtube_url, spotify_url, soundcloud_url,
+        image_url, document_url,
+        submission_type, payment_amount, payment_id, payment_status, submission_status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending')
+     RETURNING id, artist_name, email, title, submission_type, created_at`,
+    [
+      artist_name, email, title||null, content||null,
+      youtube_url||null, spotify_url||null, soundcloud_url||null,
+      image_url||null, document_url||null,
+      legacyType, payment_amount, legacyPaymentId, payment_status,
+    ]
+  );
+}
+
+// ── @route POST /api/submissions/create-payment-intent ─────────────────────────
 router.post(
   "/create-payment-intent",
   [
@@ -68,16 +128,13 @@ router.post(
 
     try {
       const { submission_type, email, artist_name } = req.body;
-      const amount = getAmount(submission_type);
-
       const paymentIntent = await stripe.paymentIntents.create({
-        amount,
+        amount: getAmount(submission_type),
         currency: "usd",
         automatic_payment_methods: { enabled: true },
         receipt_email: email,
         metadata: { artist_name, email, submission_type },
       });
-
       res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
     } catch (error) {
       console.error('Error creating payment intent:', error.message);
@@ -86,12 +143,10 @@ router.post(
   }
 );
 
-// @route   POST /api/submissions/free-submit
-// @desc    Save a free (no-payment) music submission
-// @access  Public
+// ── @route POST /api/submissions/free-submit ──────────────────────────────────
 router.post(
   "/free-submit",
-  FULL_SUBMIT_FIELDS,
+  UPLOAD_FIELDS,
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
@@ -109,59 +164,50 @@ router.post(
     } = req.body;
 
     try {
-      // Upload cover image if provided
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        const result = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
-        imageUrl = result.secure_url;
+        const r = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
+        imageUrl = r.secure_url;
       }
 
-      const result = await pool.query(
-        `INSERT INTO music_submissions
-          (artist_name, email, title, content,
-           youtube_url, spotify_url, soundcloud_url, apple_music_url,
-           instagram_url, genre, image_url,
-           submission_type, payment_amount, payment_status, submission_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'free',0,'free','pending')
-         RETURNING id, artist_name, email, title, submission_type, created_at`,
-        [
-          artist_name, email, title, content,
-          youtube_url || null, spotify_url || null, soundcloud_url || null, apple_music_url || null,
-          instagram_url || null, genre || null, imageUrl,
-        ]
-      );
+      const result = await safeInsert({
+        artist_name, email, title, content,
+        youtube_url, spotify_url, soundcloud_url,
+        apple_music_url, instagram_url, genre,
+        image_url: imageUrl, document_url: null,
+        genius_song_url: null, genius_lyrics: null,
+        submission_type: 'free', payment_amount: 0,
+        payment_id: null, payment_status: 'free',
+      });
 
-      // Notify owner (fire-and-forget)
       sendOwnerNotification({
-        artist_name, email, title, submission_type: 'free',
-        payment_amount: 0, content,
-        youtube_url, spotify_url, soundcloud_url, apple_music_url, instagram_url, genre,
+        artist_name, email, title,
+        submission_type: 'free', payment_amount: 0, content,
+        youtube_url, spotify_url, soundcloud_url,
+        apple_music_url, instagram_url, genre,
         image_url: imageUrl,
       }).catch(err => console.error('Owner email error:', err));
 
       sendCustomerConfirmation({
         artist_name, email,
-        submission_type: 'free',
-        payment_amount: 0,
+        submission_type: 'free', payment_amount: 0,
       }).catch(err => console.error('Customer email error:', err));
 
       res.status(201).json({
-        message: "Free submission received! We'll review your music and get back to you soon.",
+        message: "Free submission received! We'll review your music and get back to you.",
         submission: result.rows[0],
       });
     } catch (error) {
-      console.error('Error saving free submission:', error.message);
-      res.status(500).json({ message: "Failed to save submission" });
+      console.error('Error saving free submission:', error.message, error.code);
+      res.status(500).json({ message: "Failed to save submission: " + error.message });
     }
   }
 );
 
-// @route   POST /api/submissions/submit
-// @desc    Save paid music submission after successful Stripe payment
-// @access  Public
+// ── @route POST /api/submissions/submit (paid) ────────────────────────────────
 router.post(
   "/submit",
-  FULL_SUBMIT_FIELDS,
+  UPLOAD_FIELDS,
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
@@ -182,50 +228,39 @@ router.post(
     } = req.body;
 
     try {
-      // Verify payment
       const paymentIntent = await stripe.paymentIntents.retrieve(payment_id);
       if (paymentIntent.status !== 'succeeded') {
         return res.status(400).json({ message: "Payment not completed" });
       }
 
-      // Upload image
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        const result = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
-        imageUrl = result.secure_url;
+        const r = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
+        imageUrl = r.secure_url;
       }
 
-      // Upload document (for legacy regular/featured submissions)
       let documentUrl = null;
       if (req.files?.document?.[0]) {
-        const result = await uploadToCloudinary(req.files.document[0].buffer, 'submissions', 'raw');
-        documentUrl = result.secure_url;
+        const r = await uploadToCloudinary(req.files.document[0].buffer, 'submissions', 'raw');
+        documentUrl = r.secure_url;
       }
 
-      const result = await pool.query(
-        `INSERT INTO music_submissions
-          (artist_name, email, title, content,
-           youtube_url, spotify_url, soundcloud_url, apple_music_url,
-           instagram_url, genre, image_url, document_url,
-           genius_song_url, genius_lyrics,
-           submission_type, payment_amount, payment_id, payment_status, submission_status)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'completed','pending')
-         RETURNING id, artist_name, email, title, submission_type, created_at`,
-        [
-          artist_name, email, title, content || null,
-          youtube_url || null, spotify_url || null, soundcloud_url || null, apple_music_url || null,
-          instagram_url || null, genre || null, imageUrl, documentUrl,
-          genius_song_url || null, genius_lyrics || null,
-          submission_type, paymentIntent.amount, payment_id,
-        ]
-      );
+      const result = await safeInsert({
+        artist_name, email, title, content: content||null,
+        youtube_url, spotify_url, soundcloud_url,
+        apple_music_url, instagram_url, genre,
+        image_url: imageUrl, document_url: documentUrl,
+        genius_song_url: genius_song_url||null, genius_lyrics: genius_lyrics||null,
+        submission_type, payment_amount: paymentIntent.amount,
+        payment_id, payment_status: 'completed',
+      });
 
-      // Emails
       sendOwnerNotification({
         artist_name, email, title, submission_type,
         payment_amount: paymentIntent.amount, content,
-        youtube_url, spotify_url, soundcloud_url, apple_music_url,
-        instagram_url, genre, image_url: imageUrl, document_url: documentUrl,
+        youtube_url, spotify_url, soundcloud_url,
+        apple_music_url, instagram_url, genre,
+        image_url: imageUrl, document_url: documentUrl,
         genius_song_url, genius_lyrics,
       }).catch(err => console.error('Owner email error:', err));
 
@@ -239,15 +274,13 @@ router.post(
         submission: result.rows[0],
       });
     } catch (error) {
-      console.error('Error saving paid submission:', error.message);
-      res.status(500).json({ message: "Failed to save submission" });
+      console.error('Error saving paid submission:', error.message, error.code);
+      res.status(500).json({ message: "Failed to save submission: " + error.message });
     }
   }
 );
 
-// @route   GET /api/submissions
-// @desc    Get all submissions (admin)
-// @access  Private
+// ── @route GET /api/submissions ───────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM music_submissions ORDER BY created_at DESC');
@@ -258,9 +291,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// @route   POST /api/submissions/:id/publish
-// @desc    Publish a submission as an article
-// @access  Private
+// ── @route POST /api/submissions/:id/publish ──────────────────────────────────
 router.post("/:id/publish", async (req, res) => {
   const { id } = req.params;
   try {
@@ -274,13 +305,9 @@ router.post("/:id/publish", async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,'article',$8)
        RETURNING id, title, author, created_at`,
       [
-        sub.title,
-        sub.artist_name,
+        sub.title, sub.artist_name,
         sub.content || 'Content provided via submission.',
-        sub.image_url,
-        sub.youtube_url,
-        sub.spotify_url,
-        sub.soundcloud_url,
+        sub.image_url, sub.youtube_url, sub.spotify_url, sub.soundcloud_url,
         sub.submission_type === 'featured',
       ]
     );
@@ -297,13 +324,11 @@ router.post("/:id/publish", async (req, res) => {
   }
 });
 
-// @route   PUT /api/submissions/:id/status
-// @desc    Update submission status
-// @access  Private
+// ── @route PUT /api/submissions/:id/status ────────────────────────────────────
 router.put("/:id/status", async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-  if (!['pending', 'approved', 'rejected'].includes(status))
+  if (!['pending','approved','rejected'].includes(status))
     return res.status(400).json({ message: "Invalid status" });
 
   try {
