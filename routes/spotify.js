@@ -43,10 +43,88 @@ async function spotifyGet(path, token) {
   return r.ok ? r.json() : null;
 }
 
+// ── Playlist insights: fetch tracks → audio features + artist genres ─────────
+async function fetchPlaylistInsights(id, token) {
+  try {
+    // 1. Fetch up to 50 tracks (one page — good enough for aggregate stats)
+    const tracksRaw = await spotifyGet(
+      `playlists/${id}/tracks?fields=items(track(id,name,popularity,artists(id,name)))&limit=50&market=US`,
+      token
+    );
+    if (!tracksRaw?.items) return null;
+
+    const tracks = tracksRaw.items
+      .map(i => i.track)
+      .filter(t => t?.id);   // remove null/unavailable entries
+
+    if (!tracks.length) return null;
+
+    const trackIds  = tracks.map(t => t.id);
+    const artistIds = [...new Set(
+      tracks.flatMap(t => (t.artists || []).map(a => a.id))
+    )].slice(0, 50); // artist batch endpoint caps at 50
+
+    // 2. Parallel: batch audio features + batch artist genres
+    const [featuresRaw, artistsRaw] = await Promise.all([
+      spotifyGet(`audio-features?ids=${trackIds.join(',')}`, token),
+      artistIds.length
+        ? spotifyGet(`artists?ids=${artistIds.join(',')}`, token)
+        : Promise.resolve(null),
+    ]);
+
+    const features = (featuresRaw?.audio_features || []).filter(Boolean);
+    const artists  = (artistsRaw?.artists         || []).filter(Boolean);
+
+    // 3. Average helper
+    const avg = (arr, key) => {
+      const vals = arr.map(x => x?.[key]).filter(v => v != null && !isNaN(v));
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    };
+    const r2 = n => (n != null ? Math.round(n * 100) / 100 : null);
+
+    // 4. Genre frequency across all artists in the playlist
+    const genreCount = {};
+    artists.forEach(a =>
+      (a.genres || []).forEach(g => { genreCount[g] = (genreCount[g] || 0) + 1; })
+    );
+    const topGenres = Object.entries(genreCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([g]) => g);
+
+    // 5. Top 3 tracks by popularity
+    const topTracks = [...tracks]
+      .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+      .slice(0, 3)
+      .map(t => ({
+        name:       t.name,
+        artist:     t.artists?.[0]?.name || null,
+        popularity: t.popularity ?? null,
+      }));
+
+    return {
+      analyzedCount:   tracks.length,
+      avgBpm:          features.length ? Math.round(avg(features, 'tempo')) : null,
+      avgEnergy:       r2(avg(features, 'energy')),
+      avgDanceability: r2(avg(features, 'danceability')),
+      avgValence:      r2(avg(features, 'valence')),
+      avgAcousticness: r2(avg(features, 'acousticness')),
+      avgPopularity:   tracks.length ? Math.round(avg(tracks, 'popularity')) : null,
+      topGenres,
+      topTracks,
+    };
+  } catch (_) {
+    return null;   // insights are best-effort — never break the main response
+  }
+}
+
 // ── Fetch + normalise by type ─────────────────────────────────────────────────
 async function fetchAndNormalise(type, id, token) {
   if (type === 'playlist') {
-    const raw = await spotifyGet(`playlists/${id}`, token);
+    const [raw, insights] = await Promise.all([
+      spotifyGet(`playlists/${id}`, token),
+      fetchPlaylistInsights(id, token),
+    ]);
     if (!raw) return null;
     return {
       type:          'playlist',
@@ -59,7 +137,7 @@ async function fetchAndNormalise(type, id, token) {
       isPublic:      raw.public ?? null,
       collaborative: raw.collaborative ?? false,
       spotifyUrl:    raw.external_urls?.spotify || null,
-      // playlists have no popularity in the Spotify API
+      insights,   // { avgBpm, avgEnergy, avgDanceability, avgValence, topGenres, topTracks, … }
     };
   }
 
