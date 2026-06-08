@@ -10,99 +10,75 @@ import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
-// Configure multer for memory storage
+// ── Multer ─────────────────────────────────────────────────────────────────────
 const storage = multer.memoryStorage();
 const upload = multer({
-  storage: storage,
-  limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB limit
-  },
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Allow images for the image field
-    if (file.fieldname === 'image' && file.mimetype.startsWith('image/')) {
-      cb(null, true);
+    if (file.fieldname === 'image' && file.mimetype.startsWith('image/')) return cb(null, true);
+    if (file.fieldname === 'document') {
+      const allowed = ['text/plain','application/pdf','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+      return allowed.includes(file.mimetype) ? cb(null, true) : cb(new Error('Only txt, doc, docx, pdf allowed'), false);
     }
-    // Allow documents (txt, doc, docx, pdf) for the document field
-    else if (file.fieldname === 'document') {
-      const allowedMimeTypes = [
-        'text/plain',
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      ];
-      if (allowedMimeTypes.includes(file.mimetype)) {
-        cb(null, true);
-      } else {
-        cb(new Error('Only txt, doc, docx, and pdf files are allowed for documents!'), false);
-      }
-    }
-    else {
-      cb(new Error('Invalid file type!'), false);
-    }
-  }
+    cb(new Error('Invalid file type'), false);
+  },
 });
 
-// Helper function to upload buffer to Cloudinary
-const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        resource_type: resourceType
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-
-    const readableStream = Readable.from(buffer);
-    readableStream.pipe(uploadStream);
+// ── Cloudinary helper ──────────────────────────────────────────────────────────
+const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream({ folder, resource_type: resourceType }, (err, result) => {
+      err ? reject(err) : resolve(result);
+    });
+    Readable.from(buffer).pipe(stream);
   });
-};
+
+// ── Shared fields for the full submit ─────────────────────────────────────────
+const FULL_SUBMIT_FIELDS = upload.fields([
+  { name: 'image',    maxCount: 1 },
+  { name: 'document', maxCount: 1 },
+]);
+
+// ── All valid submission types ─────────────────────────────────────────────────
+const ALL_TYPES    = ['free', 'regular', 'priority', 'featured', 'genius'];
+const PAID_TYPES   = ['regular', 'priority', 'featured', 'genius'];
+
+// ── Pricing map ────────────────────────────────────────────────────────────────
+function getAmount(type) {
+  if (type === 'featured') return 700; // legacy $7
+  if (type === 'genius')   return 1000; // $10
+  return 500; // regular / priority → $5
+}
 
 // @route   POST /api/submissions/create-payment-intent
-// @desc    Create a Stripe payment intent for music submission
+// @desc    Create Stripe payment intent for paid submissions
 // @access  Public
 router.post(
   "/create-payment-intent",
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
-    body("content").trim().notEmpty().withMessage("Content is required"),
-    body("submission_type").isIn(['regular', 'featured']).withMessage("Invalid submission type"),
+    body("content").trim().notEmpty().withMessage("Content/description is required"),
+    body("submission_type").isIn(PAID_TYPES).withMessage("Invalid submission type"),
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     try {
-      const { submission_type } = req.body;
+      const { submission_type, email, artist_name } = req.body;
+      const amount = getAmount(submission_type);
 
-      // Set price based on submission type
-      const amount = submission_type === 'featured' ? 700 : 500; // $7 for featured, $5 for regular
-
-      // Create payment intent with Stripe
       const paymentIntent = await stripe.paymentIntents.create({
-        amount: amount,
+        amount,
         currency: "usd",
-        automatic_payment_methods: {
-          enabled: true,
-        },
-        receipt_email: req.body.email, // Automatically send Stripe receipt
-        metadata: {
-          artist_name: req.body.artist_name,
-          email: req.body.email,
-          submission_type: submission_type,
-        },
+        automatic_payment_methods: { enabled: true },
+        receipt_email: email,
+        metadata: { artist_name, email, submission_type },
       });
 
-      res.json({
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
-      });
+      res.json({ clientSecret: paymentIntent.client_secret, paymentIntentId: paymentIntent.id });
     } catch (error) {
       console.error('Error creating payment intent:', error.message);
       res.status(500).json({ message: "Failed to create payment intent" });
@@ -110,135 +86,172 @@ router.post(
   }
 );
 
-// @route   POST /api/submissions/submit
-// @desc    Save music submission after successful payment
+// @route   POST /api/submissions/free-submit
+// @desc    Save a free (no-payment) music submission
 // @access  Public
 router.post(
-  "/submit",
-  upload.fields([
-    { name: 'image', maxCount: 1 },
-    { name: 'document', maxCount: 1 }
-  ]),
+  "/free-submit",
+  FULL_SUBMIT_FIELDS,
   [
     body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
     body("email").isEmail().withMessage("Valid email is required"),
     body("title").trim().notEmpty().withMessage("Title is required"),
-    // Content is optional if document is provided
-    body("payment_id").trim().notEmpty().withMessage("Payment ID is required"),
-    body("submission_type").isIn(['regular', 'featured']).withMessage("Invalid submission type"),
+    body("content").trim().notEmpty().withMessage("Description is required"),
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-    const { artist_name, email, title, content, youtube_url, spotify_url, soundcloud_url, payment_id, submission_type } = req.body;
+    const {
+      artist_name, email, title, content,
+      youtube_url, spotify_url, soundcloud_url,
+      apple_music_url, instagram_url, genre,
+    } = req.body;
 
     try {
-      // Validate that either content or document is provided
-      const hasContent = content && content.trim().length > 0;
-      const hasDocument = req.files && req.files['document'] && req.files['document'].length > 0;
-
-      if (!hasContent && !hasDocument) {
-        return res.status(400).json({ message: "Either content text or document file is required" });
+      // Upload cover image if provided
+      let imageUrl = null;
+      if (req.files?.image?.[0]) {
+        const result = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
+        imageUrl = result.secure_url;
       }
 
-      // If content is provided, validate length
-      if (hasContent && (content.trim().length < 300 || content.trim().length > 5000)) {
-        return res.status(400).json({ message: "Content must be between 300 and 5000 characters" });
-      }
+      const result = await pool.query(
+        `INSERT INTO music_submissions
+          (artist_name, email, title, content,
+           youtube_url, spotify_url, soundcloud_url, apple_music_url,
+           instagram_url, genre, image_url,
+           submission_type, payment_amount, payment_status, submission_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'free',0,'free','pending')
+         RETURNING id, artist_name, email, title, submission_type, created_at`,
+        [
+          artist_name, email, title, content,
+          youtube_url || null, spotify_url || null, soundcloud_url || null, apple_music_url || null,
+          instagram_url || null, genre || null, imageUrl,
+        ]
+      );
 
-      // Verify payment with Stripe
+      // Notify owner (fire-and-forget)
+      sendOwnerNotification({
+        artist_name, email, title, submission_type: 'free',
+        payment_amount: 0, content,
+        youtube_url, spotify_url, soundcloud_url, apple_music_url, instagram_url, genre,
+        image_url: imageUrl,
+      }).catch(err => console.error('Owner email error:', err));
+
+      sendCustomerConfirmation({
+        artist_name, email,
+        submission_type: 'free',
+        payment_amount: 0,
+      }).catch(err => console.error('Customer email error:', err));
+
+      res.status(201).json({
+        message: "Free submission received! We'll review your music and get back to you soon.",
+        submission: result.rows[0],
+      });
+    } catch (error) {
+      console.error('Error saving free submission:', error.message);
+      res.status(500).json({ message: "Failed to save submission" });
+    }
+  }
+);
+
+// @route   POST /api/submissions/submit
+// @desc    Save paid music submission after successful Stripe payment
+// @access  Public
+router.post(
+  "/submit",
+  FULL_SUBMIT_FIELDS,
+  [
+    body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("title").trim().notEmpty().withMessage("Title is required"),
+    body("payment_id").trim().notEmpty().withMessage("Payment ID is required"),
+    body("submission_type").isIn(PAID_TYPES).withMessage("Invalid submission type"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const {
+      artist_name, email, title, content,
+      youtube_url, spotify_url, soundcloud_url,
+      apple_music_url, instagram_url, genre,
+      payment_id, submission_type,
+      genius_song_url, genius_lyrics,
+    } = req.body;
+
+    try {
+      // Verify payment
       const paymentIntent = await stripe.paymentIntents.retrieve(payment_id);
-
       if (paymentIntent.status !== 'succeeded') {
         return res.status(400).json({ message: "Payment not completed" });
       }
 
-      // Get payment amount from payment intent
-      const payment_amount = paymentIntent.amount;
-
-      // Upload image to Cloudinary if provided
+      // Upload image
       let imageUrl = null;
-      if (req.files && req.files['image'] && req.files['image'].length > 0) {
-        try {
-          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer, 'submissions', 'image');
-          imageUrl = uploadResult.secure_url;
-          console.log('Image uploaded to Cloudinary (submissions folder):', imageUrl);
-        } catch (uploadError) {
-          console.error('Cloudinary image upload error:', uploadError);
-          return res.status(500).json({ message: "Failed to upload image" });
-        }
+      if (req.files?.image?.[0]) {
+        const result = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
+        imageUrl = result.secure_url;
       }
 
-      // Upload document to Cloudinary if provided
+      // Upload document (for legacy regular/featured submissions)
       let documentUrl = null;
-      if (hasDocument) {
-        try {
-          const uploadResult = await uploadToCloudinary(req.files['document'][0].buffer, 'submissions', 'raw');
-          documentUrl = uploadResult.secure_url;
-          console.log('Document uploaded to Cloudinary (submissions folder):', documentUrl);
-        } catch (uploadError) {
-          console.error('Cloudinary document upload error:', uploadError);
-          return res.status(500).json({ message: "Failed to upload document" });
-        }
+      if (req.files?.document?.[0]) {
+        const result = await uploadToCloudinary(req.files.document[0].buffer, 'submissions', 'raw');
+        documentUrl = result.secure_url;
       }
 
-      // Save submission to database
       const result = await pool.query(
-        `INSERT INTO music_submissions (artist_name, email, title, content, youtube_url, spotify_url, soundcloud_url, image_url, document_url, submission_type, payment_amount, payment_id, payment_status, submission_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+        `INSERT INTO music_submissions
+          (artist_name, email, title, content,
+           youtube_url, spotify_url, soundcloud_url, apple_music_url,
+           instagram_url, genre, image_url, document_url,
+           genius_song_url, genius_lyrics,
+           submission_type, payment_amount, payment_id, payment_status, submission_status)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'completed','pending')
          RETURNING id, artist_name, email, title, submission_type, created_at`,
-        [artist_name, email, title, content || null, youtube_url || null, spotify_url || null, soundcloud_url || null, imageUrl, documentUrl, submission_type, payment_amount, payment_id, 'completed', 'pending']
+        [
+          artist_name, email, title, content || null,
+          youtube_url || null, spotify_url || null, soundcloud_url || null, apple_music_url || null,
+          instagram_url || null, genre || null, imageUrl, documentUrl,
+          genius_song_url || null, genius_lyrics || null,
+          submission_type, paymentIntent.amount, payment_id,
+        ]
       );
 
-      // Send email notifications (don't wait for them, send async)
+      // Emails
       sendOwnerNotification({
-        artist_name,
-        email,
-        title,
-        submission_type,
-        payment_amount,
-        content,
-        youtube_url,
-        spotify_url,
-        soundcloud_url,
-        image_url: imageUrl,
-        document_url: documentUrl,
-      }).catch(err => console.error('Error sending owner notification:', err));
+        artist_name, email, title, submission_type,
+        payment_amount: paymentIntent.amount, content,
+        youtube_url, spotify_url, soundcloud_url, apple_music_url,
+        instagram_url, genre, image_url: imageUrl, document_url: documentUrl,
+        genius_song_url, genius_lyrics,
+      }).catch(err => console.error('Owner email error:', err));
 
       sendCustomerConfirmation({
-        artist_name,
-        email,
-        submission_type,
-        payment_amount,
-      }).catch(err => console.error('Error sending customer confirmation:', err));
+        artist_name, email, submission_type,
+        payment_amount: paymentIntent.amount,
+      }).catch(err => console.error('Customer email error:', err));
 
       res.status(201).json({
-        message: "Submission received successfully! We'll review it and get back to you soon.",
-        submission: result.rows[0]
+        message: "Submission received! We'll review it and get back to you soon.",
+        submission: result.rows[0],
       });
     } catch (error) {
-      console.error('Error saving submission:', error.message);
+      console.error('Error saving paid submission:', error.message);
       res.status(500).json({ message: "Failed to save submission" });
     }
   }
 );
 
 // @route   GET /api/submissions
-// @desc    Get all submissions (admin only - would need auth middleware)
+// @desc    Get all submissions (admin)
 // @access  Private
 router.get("/", async (req, res) => {
   try {
-    const result = await pool.query(
-      'SELECT * FROM music_submissions ORDER BY created_at DESC'
-    );
-
-    res.json({
-      submissions: result.rows,
-      count: result.rows.length
-    });
+    const result = await pool.query('SELECT * FROM music_submissions ORDER BY created_at DESC');
+    res.json({ submissions: result.rows, count: result.rows.length });
   } catch (error) {
     console.error('Error fetching submissions:', error.message);
     res.status(500).json({ message: "Server error" });
@@ -247,56 +260,37 @@ router.get("/", async (req, res) => {
 
 // @route   POST /api/submissions/:id/publish
 // @desc    Publish a submission as an article
-// @access  Private (admin only)
+// @access  Private
 router.post("/:id/publish", async (req, res) => {
   const { id } = req.params;
-
   try {
-    // Get submission details
-    const submissionResult = await pool.query(
-      'SELECT * FROM music_submissions WHERE id = $1',
-      [id]
-    );
+    const { rows } = await pool.query('SELECT * FROM music_submissions WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).json({ message: "Submission not found" });
+    const sub = rows[0];
+    if (sub.submission_status === 'approved') return res.status(400).json({ message: "Already published" });
 
-    if (submissionResult.rows.length === 0) {
-      return res.status(404).json({ message: "Submission not found" });
-    }
-
-    const submission = submissionResult.rows[0];
-
-    // Check if already published
-    if (submission.submission_status === 'approved') {
-      return res.status(400).json({ message: "Submission already published" });
-    }
-
-    // Create article from submission
-    const articleResult = await pool.query(
+    const article = await pool.query(
       `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, soundcloud_url, category, is_featured)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'article',$8)
        RETURNING id, title, author, created_at`,
       [
-        submission.title,
-        submission.artist_name,
-        submission.content || 'Content provided via document upload. Please check submission details.',
-        submission.image_url,
-        submission.youtube_url,
-        submission.spotify_url,
-        submission.soundcloud_url,
-        'article',
-        submission.submission_type === 'featured'
+        sub.title,
+        sub.artist_name,
+        sub.content || 'Content provided via submission.',
+        sub.image_url,
+        sub.youtube_url,
+        sub.spotify_url,
+        sub.soundcloud_url,
+        sub.submission_type === 'featured',
       ]
     );
 
-    // Update submission status to approved
     await pool.query(
-      'UPDATE music_submissions SET submission_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      'UPDATE music_submissions SET submission_status=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2',
       ['approved', id]
     );
 
-    res.json({
-      message: "Article published successfully",
-      article: articleResult.rows[0]
-    });
+    res.json({ message: "Article published successfully", article: article.rows[0] });
   } catch (error) {
     console.error('Error publishing submission:', error.message);
     res.status(500).json({ message: "Failed to publish article" });
@@ -305,33 +299,22 @@ router.post("/:id/publish", async (req, res) => {
 
 // @route   PUT /api/submissions/:id/status
 // @desc    Update submission status
-// @access  Private (admin only)
+// @access  Private
 router.put("/:id/status", async (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-
-  // Validate status
-  const validStatuses = ['pending', 'approved', 'rejected'];
-  if (!validStatuses.includes(status)) {
+  if (!['pending', 'approved', 'rejected'].includes(status))
     return res.status(400).json({ message: "Invalid status" });
-  }
 
   try {
     const result = await pool.query(
-      'UPDATE music_submissions SET submission_status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
+      'UPDATE music_submissions SET submission_status=$1, updated_at=CURRENT_TIMESTAMP WHERE id=$2 RETURNING *',
       [status, id]
     );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ message: "Submission not found" });
-    }
-
-    res.json({
-      message: "Status updated successfully",
-      submission: result.rows[0]
-    });
+    if (!result.rows.length) return res.status(404).json({ message: "Submission not found" });
+    res.json({ message: "Status updated", submission: result.rows[0] });
   } catch (error) {
-    console.error('Error updating submission status:', error.message);
+    console.error('Error updating status:', error.message);
     res.status(500).json({ message: "Failed to update status" });
   }
 });

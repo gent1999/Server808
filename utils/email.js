@@ -15,14 +15,27 @@ const createTransporter = () => {
 /**
  * Send notification email to site owner about new submission
  */
+function typeLabel(type) {
+  if (type === 'priority') return '⚡ Priority (Skip the Line)';
+  if (type === 'featured') return '🏆 Featured Article';
+  if (type === 'genius')   return '📝 Genius Lyrics';
+  if (type === 'free')     return '📬 Free Submission';
+  return '📰 Regular Article';
+}
+
 export async function sendOwnerNotification(submissionData) {
   try {
     const transporter = createTransporter();
 
-    const { artist_name, email, title, submission_type, payment_amount, content, youtube_url, spotify_url, image_url, document_url } = submissionData;
+    const {
+      artist_name, email, title, submission_type, payment_amount, content,
+      youtube_url, spotify_url, soundcloud_url, apple_music_url,
+      instagram_url, genre, image_url, document_url,
+      genius_song_url, genius_lyrics,
+    } = submissionData;
 
-    const submissionTypeLabel = submission_type === 'featured' ? '🏆 Featured Article' : '📰 Regular Article';
-    const amount = (payment_amount / 100).toFixed(2); // Convert cents to dollars
+    const submissionTypeLabel = typeLabel(submission_type);
+    const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -37,7 +50,7 @@ export async function sendOwnerNotification(submissionData) {
           <div style="padding: 30px; background: #f9f9f9;">
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h2 style="color: #667eea; margin-top: 0;">${submissionTypeLabel}</h2>
-              <p style="font-size: 18px; color: #28a745; font-weight: bold;">Payment: $${amount}</p>
+              <p style="font-size: 18px; color: #28a745; font-weight: bold;">Payment: ${amount}</p>
             </div>
 
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
@@ -93,6 +106,48 @@ export async function sendOwnerNotification(submissionData) {
             </div>
             ` : ''}
 
+            ${soundcloud_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">☁️ SoundCloud Link</h3>
+              <p><a href="${soundcloud_url}" style="color: #667eea;">${soundcloud_url}</a></p>
+            </div>
+            ` : ''}
+
+            ${apple_music_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">🍎 Apple Music Link</h3>
+              <p><a href="${apple_music_url}" style="color: #667eea;">${apple_music_url}</a></p>
+            </div>
+            ` : ''}
+
+            ${instagram_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">📸 Instagram</h3>
+              <p>${instagram_url}</p>
+            </div>
+            ` : ''}
+
+            ${genre ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">🎶 Genre</h3>
+              <p>${genre}</p>
+            </div>
+            ` : ''}
+
+            ${genius_song_url ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">📝 Genius — Song Link</h3>
+              <p><a href="${genius_song_url}" style="color: #667eea;">${genius_song_url}</a></p>
+            </div>
+            ` : ''}
+
+            ${genius_lyrics ? `
+            <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+              <h3 style="color: #333; margin-top: 0;">📝 Submitted Lyrics</h3>
+              <pre style="white-space: pre-wrap; line-height: 1.7; font-family: monospace; font-size: 13px; color: #333;">${genius_lyrics}</pre>
+            </div>
+            ` : ''}
+
             <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107;">
               <p style="margin: 0; color: #856404;">
                 <strong>Action Required:</strong> Review this submission and publish the article from your admin dashboard.
@@ -124,8 +179,8 @@ export async function sendCustomerConfirmation(submissionData) {
 
     const { artist_name, email, submission_type, payment_amount } = submissionData;
 
-    const submissionTypeLabel = submission_type === 'featured' ? '🏆 Featured Article' : '📰 Regular Article';
-    const amount = (payment_amount / 100).toFixed(2);
+    const submissionTypeLabel = typeLabel(submission_type);
+    const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
     const mailOptions = {
       from: process.env.EMAIL_USER,
@@ -141,7 +196,9 @@ export async function sendCustomerConfirmation(submissionData) {
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h2 style="color: #667eea; margin-top: 0;">Submission Confirmed</h2>
               <p style="font-size: 16px; line-height: 1.6;">
-                Your music submission has been successfully received and your payment of <strong>$${amount}</strong> has been processed.
+                ${payment_amount > 0
+                  ? `Your music submission has been successfully received and your payment of <strong>${amount}</strong> has been processed.`
+                  : 'Your free music submission has been successfully received.'}
               </p>
             </div>
 
@@ -157,12 +214,27 @@ export async function sendCustomerConfirmation(submissionData) {
 
             <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
               <h3 style="color: #333; margin-top: 0;">What Happens Next?</h3>
+              ${submission_type === 'priority' ? `
+              <ul style="line-height: 1.8;">
+                <li>You've been moved to the <strong>top of the review queue</strong></li>
+                <li>Expect a response within <strong>1–2 business days</strong></li>
+                <li>If approved, your article will be published on Cry808</li>
+                <li>We'll email you once it's live</li>
+              </ul>
+              ` : submission_type === 'genius' ? `
+              <ul style="line-height: 1.8;">
+                <li>We'll find or create your song page on Genius.com</li>
+                <li>Your lyrics will be posted within <strong>2–3 business days</strong></li>
+                <li>We'll send you the Genius link once it's live</li>
+              </ul>
+              ` : `
               <ul style="line-height: 1.8;">
                 <li>Our editorial team will review your submission</li>
-                <li>You'll receive a decision within <strong>5-7 business days</strong></li>
+                <li>You'll receive a decision within <strong>5–7 business days</strong></li>
                 <li>If approved, your article will be published on Cry808</li>
                 <li>We'll notify you via email once it's live</li>
               </ul>
+              `}
             </div>
 
             <div style="background: #d1ecf1; padding: 15px; border-radius: 8px; border-left: 4px solid #0c5460;">
