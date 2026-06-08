@@ -23,6 +23,7 @@ import engineItemsRoutes from "./routes/engineItems.js";
 import cortexRoutes from "./routes/cortex.js";
 import neonRoutes from "./routes/neon.js";
 import referralAdsRoutes from "./routes/referralAds.js";
+import spotifyRoutes from "./routes/spotify.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -217,6 +218,7 @@ app.use("/api/neon", neonRoutes);
 
 // Referral Ads (public GET, admin POST/PUT/DELETE)
 app.use("/api/referral-ads", referralAdsRoutes);
+app.use("/api/spotify", spotifyRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
