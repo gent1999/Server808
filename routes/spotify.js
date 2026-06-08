@@ -46,16 +46,16 @@ async function spotifyGet(path, token) {
 // ── Playlist insights: fetch tracks → audio features + artist genres ─────────
 async function fetchPlaylistInsights(id, token) {
   try {
-    // 1. Fetch up to 50 tracks (one page — good enough for aggregate stats)
+    // 1. Fetch up to 50 tracks — no fields filter to avoid URL-encoding issues
     const tracksRaw = await spotifyGet(
-      `playlists/${id}/tracks?fields=items(track(id,name,popularity,artists(id,name)))&limit=50&market=US`,
+      `playlists/${id}/tracks?limit=50&market=US`,
       token
     );
-    if (!tracksRaw?.items) return null;
+    if (!tracksRaw?.items?.length) return null;
 
     const tracks = tracksRaw.items
-      .map(i => i.track)
-      .filter(t => t?.id);   // remove null/unavailable entries
+      .map(i => i?.track)
+      .filter(t => t?.id);   // remove null/unavailable/local entries
 
     if (!tracks.length) return null;
 
