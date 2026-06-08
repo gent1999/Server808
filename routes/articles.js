@@ -188,8 +188,8 @@ router.post(
 
       // Insert article into database with all images
       const result = await pool.query(
-        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, categories, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        `INSERT INTO articles (title, author, content, tags, image_url, spotify_url, youtube_url, soundcloud_url, genius_url, lyrics, category, categories, is_original, is_evergreen, additional_image_1, additional_image_2, additional_image_3, site)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, 'cry808')
          RETURNING *`,
         [title, author, content, tagsArray, imageUrl, spotify_url || null, youtube_url || null, soundcloud_url || null, genius_url || null, lyrics || null, primaryCategory, categoriesArray, is_original === 'true' || is_original === true || false, is_evergreen === 'true' || is_evergreen === true || false, additionalImage1, additionalImage2, additionalImage3]
       );

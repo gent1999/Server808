@@ -301,8 +301,8 @@ router.post("/:id/publish", async (req, res) => {
     if (sub.submission_status === 'approved') return res.status(400).json({ message: "Already published" });
 
     const article = await pool.query(
-      `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, soundcloud_url, category, is_featured)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'article',$8)
+      `INSERT INTO articles (title, author, content, image_url, youtube_url, spotify_url, soundcloud_url, category, is_featured, site)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'article',$8,'cry808')
        RETURNING id, title, author, created_at`,
       [
         sub.title, sub.artist_name,
