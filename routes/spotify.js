@@ -44,78 +44,80 @@ async function spotifyGet(path, token) {
 }
 
 // ── Playlist insights: fetch tracks → audio features + artist genres ─────────
+// Every sub-request is isolated so one failing endpoint never nulls out the rest.
 async function fetchPlaylistInsights(id, token) {
+  // 1. Fetch up to 50 tracks (required — if this fails we have nothing)
+  let tracksRaw = null;
+  try { tracksRaw = await spotifyGet(`playlists/${id}/tracks?limit=50&market=US`, token); } catch (_) {}
+  if (!tracksRaw?.items?.length) return null;
+
+  const tracks = tracksRaw.items
+    .map(i => i?.track)
+    .filter(t => t?.id && !t.is_local);   // remove null/unavailable/local entries
+
+  if (!tracks.length) return null;
+
+  const trackIds  = tracks.map(t => t.id);
+  const artistIds = [...new Set(
+    tracks.flatMap(t => (t.artists || []).map(a => a.id))
+  )].slice(0, 50);
+
+  // 2. Audio features — deprecated for newer apps, gracefully skip if absent
+  let features = [];
   try {
-    // 1. Fetch up to 50 tracks — no fields filter to avoid URL-encoding issues
-    const tracksRaw = await spotifyGet(
-      `playlists/${id}/tracks?limit=50&market=US`,
-      token
-    );
-    if (!tracksRaw?.items?.length) return null;
+    const raw = await spotifyGet(`audio-features?ids=${trackIds.join(',')}`, token);
+    features = (raw?.audio_features || []).filter(Boolean);
+  } catch (_) {}
 
-    const tracks = tracksRaw.items
-      .map(i => i?.track)
-      .filter(t => t?.id);   // remove null/unavailable/local entries
+  // 3. Artist genres — isolated so audio-features failure doesn't affect this
+  let artists = [];
+  try {
+    if (artistIds.length) {
+      const raw = await spotifyGet(`artists?ids=${artistIds.join(',')}`, token);
+      artists = (raw?.artists || []).filter(Boolean);
+    }
+  } catch (_) {}
 
-    if (!tracks.length) return null;
+  // 4. Helpers
+  const avg = (arr, key) => {
+    const vals = arr.map(x => x?.[key]).filter(v => v != null && !isNaN(v));
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  };
+  const r2 = n => (n != null ? Math.round(n * 100) / 100 : null);
 
-    const trackIds  = tracks.map(t => t.id);
-    const artistIds = [...new Set(
-      tracks.flatMap(t => (t.artists || []).map(a => a.id))
-    )].slice(0, 50); // artist batch endpoint caps at 50
+  // 5. Genre frequency
+  const genreCount = {};
+  artists.forEach(a =>
+    (a.genres || []).forEach(g => { genreCount[g] = (genreCount[g] || 0) + 1; })
+  );
+  const topGenres = Object.entries(genreCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([g]) => g);
 
-    // 2. Parallel: batch audio features + batch artist genres
-    const [featuresRaw, artistsRaw] = await Promise.all([
-      spotifyGet(`audio-features?ids=${trackIds.join(',')}`, token),
-      artistIds.length
-        ? spotifyGet(`artists?ids=${artistIds.join(',')}`, token)
-        : Promise.resolve(null),
-    ]);
+  // 6. Top 3 tracks by popularity
+  const topTracks = [...tracks]
+    .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+    .slice(0, 3)
+    .map(t => ({
+      name:       t.name,
+      artist:     t.artists?.[0]?.name || null,
+      popularity: t.popularity ?? null,
+    }));
 
-    const features = (featuresRaw?.audio_features || []).filter(Boolean);
-    const artists  = (artistsRaw?.artists         || []).filter(Boolean);
-
-    // 3. Average helper
-    const avg = (arr, key) => {
-      const vals = arr.map(x => x?.[key]).filter(v => v != null && !isNaN(v));
-      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-    };
-    const r2 = n => (n != null ? Math.round(n * 100) / 100 : null);
-
-    // 4. Genre frequency across all artists in the playlist
-    const genreCount = {};
-    artists.forEach(a =>
-      (a.genres || []).forEach(g => { genreCount[g] = (genreCount[g] || 0) + 1; })
-    );
-    const topGenres = Object.entries(genreCount)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 6)
-      .map(([g]) => g);
-
-    // 5. Top 3 tracks by popularity
-    const topTracks = [...tracks]
-      .sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
-      .slice(0, 3)
-      .map(t => ({
-        name:       t.name,
-        artist:     t.artists?.[0]?.name || null,
-        popularity: t.popularity ?? null,
-      }));
-
-    return {
-      analyzedCount:   tracks.length,
-      avgBpm:          features.length ? Math.round(avg(features, 'tempo')) : null,
-      avgEnergy:       r2(avg(features, 'energy')),
-      avgDanceability: r2(avg(features, 'danceability')),
-      avgValence:      r2(avg(features, 'valence')),
-      avgAcousticness: r2(avg(features, 'acousticness')),
-      avgPopularity:   tracks.length ? Math.round(avg(tracks, 'popularity')) : null,
-      topGenres,
-      topTracks,
-    };
-  } catch (_) {
-    return null;   // insights are best-effort — never break the main response
-  }
+  return {
+    analyzedCount:   tracks.length,
+    // audio features — null when endpoint is unavailable for this Spotify app
+    avgBpm:          features.length ? Math.round(avg(features, 'tempo'))   : null,
+    avgEnergy:       r2(avg(features, 'energy')),
+    avgDanceability: r2(avg(features, 'danceability')),
+    avgValence:      r2(avg(features, 'valence')),
+    avgAcousticness: r2(avg(features, 'acousticness')),
+    // always available as long as tracks loaded
+    avgPopularity:   Math.round(avg(tracks, 'popularity') ?? 0) || null,
+    topGenres,
+    topTracks,
+  };
 }
 
 // ── Fetch + normalise by type ─────────────────────────────────────────────────
