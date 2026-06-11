@@ -54,8 +54,13 @@ router.post('/import', async (req, res) => {
       `INSERT INTO playlist_submissions
          (artist, track, spotify_url, playlist, source, gmail_message_id, submitted_at, notes)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       ON CONFLICT (gmail_message_id) DO NOTHING
-       RETURNING *`,
+       ON CONFLICT (gmail_message_id) DO UPDATE
+         SET artist     = EXCLUDED.artist,
+             track      = EXCLUDED.track,
+             updated_at = NOW()
+         WHERE playlist_submissions.track IS NULL
+           AND EXCLUDED.track IS NOT NULL
+       RETURNING *, (xmax = 0) AS inserted`,
       [
         artist.trim(),
         track?.trim() || null,
@@ -69,7 +74,13 @@ router.post('/import', async (req, res) => {
     );
 
     if (!rows.length) {
+      // Conflict existed AND the update condition was not met (track already set)
       return res.json({ message: 'Already imported (duplicate)', skipped: true });
+    }
+
+    if (!rows[0].inserted) {
+      // Row existed but we just patched its artist/track
+      return res.status(200).json({ message: 'Submission updated (track fixed)', submission: rows[0] });
     }
 
     res.status(201).json({ message: 'Submission imported', submission: rows[0] });
