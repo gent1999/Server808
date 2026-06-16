@@ -15,11 +15,14 @@ pool.query(`
     name              VARCHAR(255) NOT NULL,
     slug              VARCHAR(255) UNIQUE NOT NULL,
     bio               TEXT,
+    bio2              TEXT,
     profile_image_url TEXT,
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
-`).then(() => pool.query(`
+`).then(() => pool.query(
+  `ALTER TABLE artists ADD COLUMN IF NOT EXISTS bio2 TEXT`
+)).then(() => pool.query(`
   CREATE TABLE IF NOT EXISTS artist_articles (
     artist_id  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
     article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -120,7 +123,7 @@ router.post('/', auth, upload, [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, bio } = req.body;
+  const { name, bio, bio2 } = req.body;
   const slug = toSlug(name);
 
   try {
@@ -131,9 +134,9 @@ router.post('/', auth, upload, [
     }
 
     const { rows: [artist] } = await pool.query(
-      `INSERT INTO artists (name, slug, bio, profile_image_url)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [name, slug, bio || null, profile_image_url]
+      `INSERT INTO artists (name, slug, bio, bio2, profile_image_url)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [name, slug, bio || null, bio2 || null, profile_image_url]
     );
     res.status(201).json({ artist });
   } catch (err) {
@@ -144,7 +147,7 @@ router.post('/', auth, upload, [
 
 // PUT /api/artists/:id
 router.put('/:id', auth, upload, async (req, res) => {
-  const { name, bio } = req.body;
+  const { name, bio, bio2 } = req.body;
   try {
     let profile_image_url;
     if (req.file) {
@@ -158,6 +161,7 @@ router.put('/:id', auth, upload, async (req, res) => {
 
     if (name)                { setClauses.push(`name=$${i++}`, `slug=$${i++}`); values.push(name, toSlug(name)); }
     if (bio !== undefined)   { setClauses.push(`bio=$${i++}`); values.push(bio || null); }
+    if (bio2 !== undefined)  { setClauses.push(`bio2=$${i++}`); values.push(bio2 || null); }
     if (profile_image_url)   { setClauses.push(`profile_image_url=$${i++}`); values.push(profile_image_url); }
     setClauses.push('updated_at=NOW()');
     values.push(req.params.id);
