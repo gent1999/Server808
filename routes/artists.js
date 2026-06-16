@@ -17,12 +17,18 @@ pool.query(`
     bio               TEXT,
     bio2              TEXT,
     profile_image_url TEXT,
+    gallery_image_1   TEXT,
+    gallery_image_2   TEXT,
+    gallery_image_3   TEXT,
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
-`).then(() => pool.query(
-  `ALTER TABLE artists ADD COLUMN IF NOT EXISTS bio2 TEXT`
-)).then(() => pool.query(`
+`).then(() => Promise.all([
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS bio2 TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_1 TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_2 TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_3 TEXT`),
+])).then(() => pool.query(`
   CREATE TABLE IF NOT EXISTS artist_articles (
     artist_id  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
     article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -38,7 +44,12 @@ const upload = multer({
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('Only image files are allowed'), false);
   },
-}).single('profile_image');
+}).fields([
+  { name: 'profile_image',   maxCount: 1 },
+  { name: 'gallery_image_1', maxCount: 1 },
+  { name: 'gallery_image_2', maxCount: 1 },
+  { name: 'gallery_image_3', maxCount: 1 },
+]);
 
 const uploadToCloudinary = (buffer) =>
   new Promise((resolve, reject) => {
@@ -48,6 +59,13 @@ const uploadToCloudinary = (buffer) =>
     );
     Readable.from(buffer).pipe(stream);
   });
+
+async function uploadField(files, fieldName) {
+  const file = files?.[fieldName]?.[0];
+  if (!file) return undefined;
+  const result = await uploadToCloudinary(file.buffer);
+  return result.secure_url;
+}
 
 function toSlug(name) {
   return name.toLowerCase().trim()
@@ -127,16 +145,18 @@ router.post('/', auth, upload, [
   const slug = toSlug(name);
 
   try {
-    let profile_image_url = null;
-    if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
-      profile_image_url = result.secure_url;
-    }
+    const [profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3] = await Promise.all([
+      uploadField(req.files, 'profile_image'),
+      uploadField(req.files, 'gallery_image_1'),
+      uploadField(req.files, 'gallery_image_2'),
+      uploadField(req.files, 'gallery_image_3'),
+    ]);
 
     const { rows: [artist] } = await pool.query(
-      `INSERT INTO artists (name, slug, bio, bio2, profile_image_url)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [name, slug, bio || null, bio2 || null, profile_image_url]
+      `INSERT INTO artists (name, slug, bio, bio2, profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [name, slug, bio || null, bio2 || null,
+       profile_image_url || null, gallery_image_1 || null, gallery_image_2 || null, gallery_image_3 || null]
     );
     res.status(201).json({ artist });
   } catch (err) {
@@ -149,20 +169,24 @@ router.post('/', auth, upload, [
 router.put('/:id', auth, upload, async (req, res) => {
   const { name, bio, bio2 } = req.body;
   try {
-    let profile_image_url;
-    if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
-      profile_image_url = result.secure_url;
-    }
+    const [profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3] = await Promise.all([
+      uploadField(req.files, 'profile_image'),
+      uploadField(req.files, 'gallery_image_1'),
+      uploadField(req.files, 'gallery_image_2'),
+      uploadField(req.files, 'gallery_image_3'),
+    ]);
 
     const setClauses = [];
     const values = [];
     let i = 1;
 
-    if (name)                { setClauses.push(`name=$${i++}`, `slug=$${i++}`); values.push(name, toSlug(name)); }
-    if (bio !== undefined)   { setClauses.push(`bio=$${i++}`); values.push(bio || null); }
-    if (bio2 !== undefined)  { setClauses.push(`bio2=$${i++}`); values.push(bio2 || null); }
-    if (profile_image_url)   { setClauses.push(`profile_image_url=$${i++}`); values.push(profile_image_url); }
+    if (name)                  { setClauses.push(`name=$${i++}`, `slug=$${i++}`); values.push(name, toSlug(name)); }
+    if (bio !== undefined)     { setClauses.push(`bio=$${i++}`); values.push(bio || null); }
+    if (bio2 !== undefined)    { setClauses.push(`bio2=$${i++}`); values.push(bio2 || null); }
+    if (profile_image_url)     { setClauses.push(`profile_image_url=$${i++}`); values.push(profile_image_url); }
+    if (gallery_image_1)       { setClauses.push(`gallery_image_1=$${i++}`); values.push(gallery_image_1); }
+    if (gallery_image_2)       { setClauses.push(`gallery_image_2=$${i++}`); values.push(gallery_image_2); }
+    if (gallery_image_3)       { setClauses.push(`gallery_image_3=$${i++}`); values.push(gallery_image_3); }
     setClauses.push('updated_at=NOW()');
     values.push(req.params.id);
 
