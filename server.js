@@ -25,6 +25,7 @@ import neonRoutes from "./routes/neon.js";
 import referralAdsRoutes from "./routes/referralAds.js";
 import spotifyRoutes from "./routes/spotify.js";
 import playlistSubmissionsRoutes from "./routes/playlistSubmissions.js";
+import artistsRoutes from "./routes/artists.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -223,6 +224,12 @@ app.use("/api/spotify", spotifyRoutes);
 
 // Playlist submissions — Soundplate auto-import queue (admin auth on all routes)
 app.use("/api/playlist-submissions", authMiddleware, playlistSubmissionsRoutes);
+
+// Artists — public GET, admin POST/PUT/DELETE
+app.use("/api/artists", (req, res, next) => {
+  if (req.method === 'GET') return next();
+  return authMiddleware(req, res, next);
+}, artistsRoutes);
 
 // Sitemap routes (public - for SEO)
 app.use("/", sitemapRoutes);
