@@ -8,7 +8,7 @@ import auth from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Create table on boot (safe: IF NOT EXISTS)
+// Create tables on boot (safe: IF NOT EXISTS)
 pool.query(`
   CREATE TABLE IF NOT EXISTS artists (
     id                SERIAL PRIMARY KEY,
@@ -19,7 +19,14 @@ pool.query(`
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
-`).catch(err => console.error('[Artists] Schema migration error:', err.message));
+`).then(() => pool.query(`
+  CREATE TABLE IF NOT EXISTS artist_articles (
+    artist_id  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+    article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+    linked_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (artist_id, article_id)
+  )
+`)).catch(err => console.error('[Artists] Schema migration error:', err.message));
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -56,7 +63,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /api/artists/:slug — artist profile + their articles
+// GET /api/artists/:slug — artist profile + manually linked articles
 router.get('/:slug', async (req, res) => {
   try {
     const { rows: [artist] } = await pool.query(
@@ -66,14 +73,41 @@ router.get('/:slug', async (req, res) => {
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
 
     const { rows: articles } = await pool.query(
-      `SELECT id, title, author, image_url, categories, tags, created_at, article_url
-       FROM articles
-       WHERE LOWER(author) = LOWER($1)
-       ORDER BY created_at DESC`,
-      [artist.name]
+      `SELECT a.id, a.title, a.author, a.image_url, a.categories, a.tags, a.created_at, a.article_url
+       FROM articles a
+       JOIN artist_articles aa ON aa.article_id = a.id
+       WHERE aa.artist_id = $1
+       ORDER BY aa.linked_at DESC`,
+      [artist.id]
     );
 
     res.json({ artist, articles });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// POST /api/artists/:id/link/:articleId — manually link an article
+router.post('/:id/link/:articleId', auth, async (req, res) => {
+  try {
+    await pool.query(
+      `INSERT INTO artist_articles (artist_id, article_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [req.params.id, req.params.articleId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// DELETE /api/artists/:id/link/:articleId — unlink an article
+router.delete('/:id/link/:articleId', auth, async (req, res) => {
+  try {
+    await pool.query(
+      `DELETE FROM artist_articles WHERE artist_id=$1 AND article_id=$2`,
+      [req.params.id, req.params.articleId]
+    );
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
