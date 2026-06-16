@@ -28,6 +28,11 @@ pool.query(`
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_1 TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_2 TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS gallery_image_3 TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS spotify_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS soundcloud_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS youtube_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS genius_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS apple_music_url TEXT`),
 ])).then(() => pool.query(`
   CREATE TABLE IF NOT EXISTS artist_articles (
     artist_id  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
@@ -141,7 +146,7 @@ router.post('/', auth, upload, [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, bio, bio2 } = req.body;
+  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url } = req.body;
   const slug = toSlug(name);
 
   try {
@@ -153,10 +158,12 @@ router.post('/', auth, upload, [
     ]);
 
     const { rows: [artist] } = await pool.query(
-      `INSERT INTO artists (name, slug, bio, bio2, profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO artists (name, slug, bio, bio2, profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3,
+         spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [name, slug, bio || null, bio2 || null,
-       profile_image_url || null, gallery_image_1 || null, gallery_image_2 || null, gallery_image_3 || null]
+       profile_image_url || null, gallery_image_1 || null, gallery_image_2 || null, gallery_image_3 || null,
+       spotify_url || null, soundcloud_url || null, youtube_url || null, genius_url || null, apple_music_url || null]
     );
     res.status(201).json({ artist });
   } catch (err) {
@@ -167,7 +174,7 @@ router.post('/', auth, upload, [
 
 // PUT /api/artists/:id
 router.put('/:id', auth, upload, async (req, res) => {
-  const { name, bio, bio2 } = req.body;
+  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url } = req.body;
   try {
     const [profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3] = await Promise.all([
       uploadField(req.files, 'profile_image'),
@@ -184,9 +191,14 @@ router.put('/:id', auth, upload, async (req, res) => {
     if (bio !== undefined)     { setClauses.push(`bio=$${i++}`); values.push(bio || null); }
     if (bio2 !== undefined)    { setClauses.push(`bio2=$${i++}`); values.push(bio2 || null); }
     if (profile_image_url)     { setClauses.push(`profile_image_url=$${i++}`); values.push(profile_image_url); }
-    if (gallery_image_1)       { setClauses.push(`gallery_image_1=$${i++}`); values.push(gallery_image_1); }
-    if (gallery_image_2)       { setClauses.push(`gallery_image_2=$${i++}`); values.push(gallery_image_2); }
-    if (gallery_image_3)       { setClauses.push(`gallery_image_3=$${i++}`); values.push(gallery_image_3); }
+    if (gallery_image_1)           { setClauses.push(`gallery_image_1=$${i++}`); values.push(gallery_image_1); }
+    if (gallery_image_2)           { setClauses.push(`gallery_image_2=$${i++}`); values.push(gallery_image_2); }
+    if (gallery_image_3)           { setClauses.push(`gallery_image_3=$${i++}`); values.push(gallery_image_3); }
+    if (spotify_url !== undefined)     { setClauses.push(`spotify_url=$${i++}`); values.push(spotify_url || null); }
+    if (soundcloud_url !== undefined)  { setClauses.push(`soundcloud_url=$${i++}`); values.push(soundcloud_url || null); }
+    if (youtube_url !== undefined)     { setClauses.push(`youtube_url=$${i++}`); values.push(youtube_url || null); }
+    if (genius_url !== undefined)      { setClauses.push(`genius_url=$${i++}`); values.push(genius_url || null); }
+    if (apple_music_url !== undefined) { setClauses.push(`apple_music_url=$${i++}`); values.push(apple_music_url || null); }
     setClauses.push('updated_at=NOW()');
     values.push(req.params.id);
 
