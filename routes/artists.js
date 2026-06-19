@@ -165,6 +165,18 @@ router.post('/', auth, upload, [
        profile_image_url || null, gallery_image_1 || null, gallery_image_2 || null, gallery_image_3 || null,
        spotify_url || null, soundcloud_url || null, youtube_url || null, genius_url || null, apple_music_url || null]
     );
+
+    // Queue indexing job — 808-engine polls for these every 60s
+    const artistUrl = `https://cry808.com/artist/${artist.slug}`;
+    pool.query(
+      `INSERT INTO engine_items (type, agent, status, title, priority, metadata)
+       VALUES ('event','indexer','pending',$1,'high',$2)`,
+      [
+        `Index requested: ${artist.name}`,
+        JSON.stringify({ url: artistUrl, title: artist.name, source: 'admin' }),
+      ]
+    ).catch(err => console.error('[Indexer] Failed to queue artist index event:', err.message));
+
     res.status(201).json({ artist });
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ message: 'An artist with that name already exists' });
@@ -207,6 +219,18 @@ router.put('/:id', auth, upload, async (req, res) => {
       values
     );
     if (!artist) return res.status(404).json({ message: 'Artist not found' });
+
+    // Re-queue indexing so Google picks up any profile changes
+    const artistUrl = `https://cry808.com/artist/${artist.slug}`;
+    pool.query(
+      `INSERT INTO engine_items (type, agent, status, title, priority, metadata)
+       VALUES ('event','indexer','pending',$1,'normal',$2)`,
+      [
+        `Re-index: ${artist.name}`,
+        JSON.stringify({ url: artistUrl, title: artist.name, source: 'admin' }),
+      ]
+    ).catch(err => console.error('[Indexer] Failed to queue artist re-index event:', err.message));
+
     res.json({ artist });
   } catch (err) {
     if (err.code === '23505') return res.status(400).json({ message: 'An artist with that name already exists' });
