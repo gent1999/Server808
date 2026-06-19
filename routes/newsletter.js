@@ -20,6 +20,16 @@ pool.query(`
   )
 `).catch(console.error);
 
+// ── Auto-create cookie consent log table ──────────────────────────────────────
+pool.query(`
+  CREATE TABLE IF NOT EXISTS cookie_consents (
+    id          SERIAL PRIMARY KEY,
+    ip_address  TEXT,
+    user_agent  TEXT,
+    accepted_at TIMESTAMPTZ DEFAULT NOW()
+  )
+`).catch(console.error);
+
 // ── Resend client (lazy init so a missing key doesn't crash the server) ───────
 let _resend = null;
 const getResend = () => {
@@ -343,6 +353,33 @@ router.post("/unsubscribe", async (req, res) => {
       "UPDATE newsletter_subscribers SET is_active = false WHERE email = $1", [email]
     );
     res.status(200).json({ message: "Unsubscribed" });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── POST /api/newsletter/cookie-consent  — public, log acceptance ────────────
+router.post("/cookie-consent", async (req, res) => {
+  try {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || null;
+    const ua = req.headers['user-agent'] || null;
+    await pool.query(
+      "INSERT INTO cookie_consents (ip_address, user_agent) VALUES ($1, $2)",
+      [ip, ua]
+    );
+    res.status(201).json({ message: "Consent logged" });
+  } catch (e) {
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+// ── GET /api/newsletter/cookie-consents  — admin ──────────────────────────────
+router.get("/cookie-consents", authMiddleware, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT id, ip_address, user_agent, accepted_at FROM cookie_consents ORDER BY accepted_at DESC LIMIT 500"
+    );
+    res.json({ consents: rows, count: rows.length });
   } catch (e) {
     res.status(500).json({ message: "Server error" });
   }
