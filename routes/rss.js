@@ -65,12 +65,20 @@ router.get('/rss.xml', async (req, res) => {
     xml += '    <language>en-us</language>\n';
     xml += `    <copyright>Copyright ${year} Cry808. All rights reserved.</copyright>\n`;
     xml += `    <lastBuildDate>${lastBuildDate}</lastBuildDate>\n`;
+    xml += '    <ttl>5</ttl>\n';
     xml += `    <atom:link href="${BASE_URL}/rss.xml" rel="self" type="application/rss+xml"/>\n`;
+    xml += '    <image>\n';
+    xml += `      <url>${BASE_URL}/og-image.png</url>\n`;
+    xml += '      <title>Cry808</title>\n';
+    xml += `      <link>${BASE_URL}</link>\n`;
+    xml += '    </image>\n';
 
     for (const article of rows) {
       const url = articleUrl(article.id, article.title);
       const pubDate = new Date(article.created_at).toUTCString();
-      const excerpt = esc(stripMarkdown(article.content).slice(0, 220));
+      const plain = stripMarkdown(article.content);
+      // description must never be empty — fall back to title
+      const excerpt = esc(plain.length > 0 ? plain.slice(0, 220) : article.title);
       const cats = Array.isArray(article.categories) && article.categories.length
         ? article.categories
         : article.category ? [article.category] : ['article'];
@@ -80,7 +88,8 @@ router.get('/rss.xml', async (req, res) => {
       xml += `      <link>${url}</link>\n`;
       xml += `      <guid isPermaLink="true">${url}</guid>\n`;
       xml += `      <pubDate>${pubDate}</pubDate>\n`;
-      xml += '      <author>Cry808</author>\n';
+      // RSS 2.0 spec: <author> must be an email address
+      xml += '      <author>noreply@cry808.com (Cry808)</author>\n';
       for (const cat of cats) {
         xml += `      <category>${esc(CATEGORY_LABELS[cat] || cat)}</category>\n`;
       }
