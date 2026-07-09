@@ -14,6 +14,7 @@ import searchConsoleRoutes from "./routes/searchConsole.js";
 import amazonProductsRoutes from "./routes/amazonProducts.js";
 import sitemapRoutes from "./routes/sitemap.js";
 import lowkeygridSitemapRoutes from "./routes/lowkeygridSitemap.js";
+import rssRoutes from "./routes/rss.js";
 import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
 import geniusRoutes from "./routes/genius.js";
@@ -231,9 +232,10 @@ app.use("/api/artists", (req, res, next) => {
   return authMiddleware(req, res, next);
 }, artistsRoutes);
 
-// Sitemap routes (public - for SEO)
+// Sitemap + RSS routes (public - for SEO)
 app.use("/", sitemapRoutes);
 app.use("/", lowkeygridSitemapRoutes);
+app.use("/", rssRoutes);
 
 // Overalls routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/overalls", overallsRoutes);
