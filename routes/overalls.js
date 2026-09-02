@@ -51,15 +51,209 @@ const generateSlug = (title) => {
     .replace(/(^-|-$)/g, '');
 };
 
-// GET /api/overalls - Get all overalls (public)
+const VALID_ARTIST_TIERS = ['mainstream', 'rising', 'underground', 'legend'];
+
+// Parses the 'attributes' form field (JSON string like {"Lyrics":94,...}) safely
+const parseAttributes = (raw) => {
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return typeof parsed === 'object' && parsed !== null ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+// Replaces this overall's linked articles with the given comma-separated id list
+const syncOverallArticles = async (overallId, articleIdsRaw) => {
+  if (articleIdsRaw === undefined) return; // field not sent — leave links untouched
+  const ids = (articleIdsRaw || '')
+    .split(',')
+    .map(s => parseInt(s.trim()))
+    .filter(n => Number.isInteger(n));
+
+  await pool.query('DELETE FROM overall_articles WHERE overall_id = $1', [overallId]);
+  if (ids.length === 0) return;
+
+  const values = ids.map((_, i) => `($1, $${i + 2})`).join(', ');
+  await pool.query(
+    `INSERT INTO overall_articles (overall_id, article_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+    [overallId, ...ids]
+  );
+};
+
+// Shared CTE that computes each overall's latest rating change from history.
+// Only overalls with 2+ history rows produce a non-null change; others get NULL
+// via the LEFT JOINs below rather than being excluded.
+const CHANGE_CTE = `
+  WITH history_ranked AS (
+    SELECT overall_id, rating, recorded_at,
+           ROW_NUMBER() OVER (PARTITION BY overall_id ORDER BY recorded_at DESC) AS rn
+    FROM overall_rating_history
+  ),
+  latest AS (SELECT overall_id, rating FROM history_ranked WHERE rn = 1),
+  previous AS (SELECT overall_id, rating FROM history_ranked WHERE rn = 2)
+`;
+
+const VALID_TIERS = ['mainstream', 'rising', 'underground', 'legend'];
+
+// GET /api/overalls - Get all overalls (public), with optional search/filter/sort
 router.get("/", async (req, res) => {
   try {
-    const result = await pool.query(
-      "SELECT * FROM overalls ORDER BY created_at DESC"
-    );
+    const { q, tier, sort } = req.query;
+
+    const needsChange = sort === 'rising' || sort === 'falling';
+    const where = [];
+    const params = [];
+
+    if (q) {
+      params.push(`%${q}%`);
+      where.push(`o.title ILIKE $${params.length}`);
+    }
+    if (tier && VALID_TIERS.includes(tier)) {
+      params.push(tier);
+      where.push(`o.artist_tier = $${params.length}`);
+    }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    let orderClause = 'ORDER BY o.created_at DESC';
+    if (sort === 'highest') orderClause = 'ORDER BY o.overall DESC NULLS LAST';
+    else if (sort === 'lowest') orderClause = 'ORDER BY o.overall ASC NULLS LAST';
+    else if (sort === 'newest') orderClause = 'ORDER BY o.created_at DESC';
+    else if (sort === 'updated') orderClause = 'ORDER BY o.updated_at DESC';
+    else if (sort === 'alpha') orderClause = 'ORDER BY o.title ASC';
+    else if (sort === 'rising') orderClause = 'ORDER BY change DESC';
+    else if (sort === 'falling') orderClause = 'ORDER BY change ASC';
+
+    let query;
+    if (needsChange) {
+      query = `
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        JOIN latest ON latest.overall_id = o.id
+        JOIN previous ON previous.overall_id = o.id
+        ${whereClause}
+        ${orderClause}
+      `;
+    } else {
+      query = `
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        LEFT JOIN latest ON latest.overall_id = o.id
+        LEFT JOIN previous ON previous.overall_id = o.id
+        ${whereClause}
+        ${orderClause}
+      `;
+    }
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (error) {
     console.error("Error fetching overalls:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/overalls/stock-watch - Top risers/fallers from rating history (public)
+router.get("/stock-watch", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 5, 20);
+
+    const upResult = await pool.query(`
+      ${CHANGE_CTE}
+      SELECT o.id, o.title, o.slug, o.image_url, o.overall, o.crop_x, o.crop_y,
+             (latest.rating - previous.rating) AS change
+      FROM overalls o
+      JOIN latest ON latest.overall_id = o.id
+      JOIN previous ON previous.overall_id = o.id
+      WHERE (latest.rating - previous.rating) > 0
+      ORDER BY change DESC
+      LIMIT $1
+    `, [limit]);
+
+    const downResult = await pool.query(`
+      ${CHANGE_CTE}
+      SELECT o.id, o.title, o.slug, o.image_url, o.overall, o.crop_x, o.crop_y,
+             (latest.rating - previous.rating) AS change
+      FROM overalls o
+      JOIN latest ON latest.overall_id = o.id
+      JOIN previous ON previous.overall_id = o.id
+      WHERE (latest.rating - previous.rating) < 0
+      ORDER BY change ASC
+      LIMIT $1
+    `, [limit]);
+
+    res.json({ up: upResult.rows, down: downResult.rows });
+  } catch (error) {
+    console.error("Error fetching stock watch:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/overalls/rankings?view= - Leaderboard views (public)
+router.get("/rankings", async (req, res) => {
+  try {
+    const view = req.query.view || 'top';
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    let rows;
+
+    if (view === 'rising' || view === 'falling') {
+      const cmp = view === 'rising' ? '> 0' : '< 0';
+      const order = view === 'rising' ? 'DESC' : 'ASC';
+      const result = await pool.query(`
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        JOIN latest ON latest.overall_id = o.id
+        JOIN previous ON previous.overall_id = o.id
+        WHERE (latest.rating - previous.rating) ${cmp}
+        ORDER BY change ${order}
+        LIMIT $1
+      `, [limit]);
+      rows = result.rows;
+    } else if (view === 'new') {
+      const result = await pool.query(`
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        LEFT JOIN latest ON latest.overall_id = o.id
+        LEFT JOIN previous ON previous.overall_id = o.id
+        ORDER BY o.created_at DESC
+        LIMIT $1
+      `, [limit]);
+      rows = result.rows;
+    } else if (view === 'underground' || view === 'legends') {
+      const tier = view === 'legends' ? 'legend' : 'underground';
+      const result = await pool.query(`
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        LEFT JOIN latest ON latest.overall_id = o.id
+        LEFT JOIN previous ON previous.overall_id = o.id
+        WHERE o.artist_tier = $1
+        ORDER BY o.overall DESC NULLS LAST
+        LIMIT $2
+      `, [tier, limit]);
+      rows = result.rows;
+    } else {
+      // 'top' - all overalls by highest rating
+      const result = await pool.query(`
+        ${CHANGE_CTE}
+        SELECT o.*, (latest.rating - previous.rating) AS change
+        FROM overalls o
+        LEFT JOIN latest ON latest.overall_id = o.id
+        LEFT JOIN previous ON previous.overall_id = o.id
+        ORDER BY o.overall DESC NULLS LAST
+        LIMIT $1
+      `, [limit]);
+      rows = result.rows;
+    }
+
+    res.json(rows.map((row, i) => ({ ...row, rank: i + 1 })));
+  } catch (error) {
+    console.error("Error fetching rankings:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -276,6 +470,73 @@ router.get("/slug/:slug", async (req, res) => {
   }
 });
 
+// GET /api/overalls/slug/:slug/history - Rating history + current/previous/peak (public)
+router.get("/slug/:slug/history", async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const overallResult = await pool.query("SELECT id FROM overalls WHERE slug = $1", [slug]);
+    if (overallResult.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+    const overallId = overallResult.rows[0].id;
+
+    const historyResult = await pool.query(
+      "SELECT rating, recorded_at FROM overall_rating_history WHERE overall_id = $1 ORDER BY recorded_at ASC",
+      [overallId]
+    );
+
+    const timeline = historyResult.rows;
+    const current = timeline.length ? timeline[timeline.length - 1].rating : null;
+    const previous = timeline.length > 1 ? timeline[timeline.length - 2].rating : null;
+    const peak = timeline.length ? Math.max(...timeline.map(r => r.rating)) : null;
+    const change = current !== null && previous !== null ? current - previous : null;
+
+    res.json({ timeline, current, previous, peak, change });
+  } catch (error) {
+    console.error("Error fetching overall history:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/overalls/slug/:slug/related - Related articles + related artists (public)
+router.get("/slug/:slug/related", async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const overallResult = await pool.query(
+      "SELECT id, artist_tier FROM overalls WHERE slug = $1",
+      [slug]
+    );
+    if (overallResult.rows.length === 0) {
+      return res.status(404).json({ error: "Overall not found" });
+    }
+    const { id: overallId, artist_tier } = overallResult.rows[0];
+
+    const articlesResult = await pool.query(
+      `SELECT a.* FROM articles a
+       JOIN overall_articles oa ON oa.article_id = a.id
+       WHERE oa.overall_id = $1
+       ORDER BY a.created_at DESC`,
+      [overallId]
+    );
+
+    let relatedArtists = [];
+    if (artist_tier) {
+      const artistsResult = await pool.query(
+        `SELECT id, title, slug, image_url, overall, crop_x, crop_y
+         FROM overalls WHERE artist_tier = $1 AND id != $2
+         ORDER BY overall DESC NULLS LAST LIMIT 6`,
+        [artist_tier, overallId]
+      );
+      relatedArtists = artistsResult.rows;
+    }
+
+    res.json({ articles: articlesResult.rows, artists: relatedArtists });
+  } catch (error) {
+    console.error("Error fetching related content:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
 // POST /api/overalls - Create new overall (protected)
 router.post(
   "/",
@@ -292,7 +553,10 @@ router.post(
     }
 
     try {
-      const { title, content, overall, instagram_link } = req.body;
+      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids } = req.body;
+
+      const tier = VALID_ARTIST_TIERS.includes(artist_tier) ? artist_tier : null;
+      const parsedAttributes = parseAttributes(attributes);
 
       // Check if image was uploaded
       if (!req.file) {
@@ -327,13 +591,28 @@ router.post(
 
       // Insert into database
       const result = await pool.query(
-        `INSERT INTO overalls (title, image_url, content, slug, overall, instagram_link)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO overalls (title, image_url, content, slug, overall, instagram_link, artist_tier, location, attributes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [title, imageUrl, content, finalSlug, overall || null, instagram_link || null]
+        [
+          title, imageUrl, content, finalSlug, overall || null, instagram_link || null,
+          tier, location || null, parsedAttributes ? JSON.stringify(parsedAttributes) : null
+        ]
       );
 
-      res.status(201).json(result.rows[0]);
+      const created = result.rows[0];
+
+      // Seed initial rating history so this overall has a starting point on its chart
+      if (created.overall !== null) {
+        await pool.query(
+          'INSERT INTO overall_rating_history (overall_id, rating) VALUES ($1, $2)',
+          [created.id, created.overall]
+        );
+      }
+
+      await syncOverallArticles(created.id, article_ids);
+
+      res.status(201).json(created);
     } catch (error) {
       console.error("Error creating overall:", error);
       res.status(500).json({ error: "Server error" });
@@ -358,7 +637,7 @@ router.put(
 
     try {
       const { id } = req.params;
-      const { title, content, overall, instagram_link } = req.body;
+      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids } = req.body;
 
       // Check if overall exists
       const existingOverall = await pool.query(
@@ -369,8 +648,16 @@ router.put(
       if (existingOverall.rows.length === 0) {
         return res.status(404).json({ error: "Overall not found" });
       }
+      const existing = existingOverall.rows[0];
 
-      let imageUrl = existingOverall.rows[0].image_url;
+      // artist_tier: '' clears it, a valid tier sets it, anything else (field omitted) keeps existing
+      const tier = artist_tier === ''
+        ? null
+        : (VALID_ARTIST_TIERS.includes(artist_tier) ? artist_tier : existing.artist_tier);
+      const newLocation = location === undefined ? existing.location : (location || null);
+      const parsedAttributes = attributes === undefined ? existing.attributes : parseAttributes(attributes);
+
+      let imageUrl = existing.image_url;
 
       // If new image was uploaded, upload to Cloudinary and delete old one
       if (req.file) {
@@ -418,16 +705,34 @@ router.put(
         slug = finalSlug;
       }
 
+      const newRating = overall === undefined ? existing.overall : (overall === '' ? null : parseInt(overall));
+
       // Update overall
       const result = await pool.query(
         `UPDATE overalls
-         SET title = $1, image_url = $2, content = $3, slug = $4, overall = $5, instagram_link = $6, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $7
+         SET title = $1, image_url = $2, content = $3, slug = $4, overall = $5, instagram_link = $6,
+             artist_tier = $7, location = $8, attributes = $9, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $10
          RETURNING *`,
-        [title, imageUrl, content, slug, overall || null, instagram_link || null, id]
+        [
+          title, imageUrl, content, slug, newRating, instagram_link || null,
+          tier, newLocation, parsedAttributes ? JSON.stringify(parsedAttributes) : null, id
+        ]
       );
 
-      res.json(result.rows[0]);
+      const updated = result.rows[0];
+
+      // Record rating history whenever the rating actually changes
+      if (newRating !== null && newRating !== existing.overall) {
+        await pool.query(
+          'INSERT INTO overall_rating_history (overall_id, rating) VALUES ($1, $2)',
+          [id, newRating]
+        );
+      }
+
+      await syncOverallArticles(id, article_ids);
+
+      res.json(updated);
     } catch (error) {
       console.error("Error updating overall:", error);
       res.status(500).json({ error: "Server error" });

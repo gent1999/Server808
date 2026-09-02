@@ -27,6 +27,7 @@ import referralAdsRoutes from "./routes/referralAds.js";
 import spotifyRoutes from "./routes/spotify.js";
 import playlistSubmissionsRoutes from "./routes/playlistSubmissions.js";
 import artistsRoutes from "./routes/artists.js";
+import searchRoutes from "./routes/search.js";
 import authMiddleware from "./middleware/auth.js";
 
 dotenv.config();
@@ -244,6 +245,9 @@ app.use("/api/overalls", overallsRoutes);
 
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
+
+// Unified search across overalls, articles, and playlists (public)
+app.use("/api/search", searchRoutes);
 
 // Genius lyrics scraper — admin only, not a public endpoint
 app.use("/api/genius-lyrics", authMiddleware, geniusRoutes);

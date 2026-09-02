@@ -64,6 +64,18 @@ router.get('/lowkeygrid-sitemap.xml', async (req, res) => {
     xml += '  </url>\n';
 
     xml += '  <url>\n';
+    xml += `    <loc>${baseUrl}/rankings</loc>\n`;
+    xml += '    <changefreq>daily</changefreq>\n';
+    xml += '    <priority>0.8</priority>\n';
+    xml += '  </url>\n';
+
+    xml += '  <url>\n';
+    xml += `    <loc>${baseUrl}/playlists</loc>\n`;
+    xml += '    <changefreq>weekly</changefreq>\n';
+    xml += '    <priority>0.6</priority>\n';
+    xml += '  </url>\n';
+
+    xml += '  <url>\n';
     xml += `    <loc>${baseUrl}/submit-music</loc>\n`;
     xml += '    <changefreq>monthly</changefreq>\n';
     xml += '    <priority>0.7</priority>\n';

@@ -69,15 +69,75 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/lowkeygrid/articles/writeups - Get all 'article' and 'interview' from both sites (public)
+// GET /api/lowkeygrid/articles/writeups - Get long-form pieces (article/interview from both
+// sites, plus 2koveralls' own review/editorial/rating_update/rankings pieces) (public)
 router.get("/writeups", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT * FROM articles WHERE category IN ('article', 'interview') ORDER BY created_at DESC"
+      `SELECT * FROM articles
+       WHERE category IN ('article', 'interview')
+          OR (site = 'lowkeygrid' AND category IN ('review', 'editorial', 'rating_update', 'rankings'))
+       ORDER BY created_at DESC`
     );
     res.json(result.rows);
   } catch (error) {
     console.error("Error fetching writeups:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// PUT /api/lowkeygrid/articles/:id/feature - Set as the lowkeygrid featured article (protected)
+router.put("/:id/feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const check = await pool.query("SELECT id FROM articles WHERE id = $1 AND site = 'lowkeygrid'", [id]);
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Article not found" });
+    }
+
+    // Only one lowkeygrid article can be featured at a time
+    await pool.query("UPDATE articles SET is_featured = false WHERE site = 'lowkeygrid' AND is_featured = true");
+
+    const result = await pool.query(
+      "UPDATE articles SET is_featured = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *",
+      [id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error setting featured article:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// DELETE /api/lowkeygrid/articles/:id/feature - Remove lowkeygrid featured status (protected)
+router.delete("/:id/feature", auth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      "UPDATE articles SET is_featured = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND site = 'lowkeygrid' RETURNING *",
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Article not found" });
+    }
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error("Error removing featured article:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+// GET /api/lowkeygrid/articles/featured/article - Get the lowkeygrid featured article (public)
+router.get("/featured/article", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM articles WHERE site = 'lowkeygrid' AND is_featured = true LIMIT 1"
+    );
+    res.json({ article: result.rows[0] || null });
+  } catch (error) {
+    console.error("Error fetching featured article:", error);
     res.status(500).json({ error: "Server error" });
   }
 });
@@ -107,7 +167,7 @@ router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      "SELECT * FROM articles WHERE id = $1 AND (category = 'trends' OR category IN ('article', 'interview'))",
+      "SELECT * FROM articles WHERE id = $1 AND category IN ('trends', 'article', 'interview', 'review', 'editorial', 'rating_update', 'rankings')",
       [id]
     );
 
