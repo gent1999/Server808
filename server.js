@@ -42,6 +42,8 @@ const ALLOWED_ORIGINS = [
   'https://www.cry808.com',
   'https://lowkeygrid.com',
   'https://www.lowkeygrid.com',
+  'https://2koveralls.com',
+  'https://www.2koveralls.com',
   // Allow localhost in dev
   'http://localhost:5173',
   'http://localhost:3000',
