@@ -82,6 +82,25 @@ const syncOverallArticles = async (overallId, articleIdsRaw) => {
   );
 };
 
+// Same as syncOverallArticles, but for links to the native koveralls_articles
+// table (Related Coverage now points here going forward).
+const syncOverallKoverallsArticles = async (overallId, koverallsArticleIdsRaw) => {
+  if (koverallsArticleIdsRaw === undefined) return; // field not sent — leave links untouched
+  const ids = (koverallsArticleIdsRaw || '')
+    .split(',')
+    .map(s => parseInt(s.trim()))
+    .filter(n => Number.isInteger(n));
+
+  await pool.query('DELETE FROM overall_koveralls_articles WHERE overall_id = $1', [overallId]);
+  if (ids.length === 0) return;
+
+  const values = ids.map((_, i) => `($1, $${i + 2})`).join(', ');
+  await pool.query(
+    `INSERT INTO overall_koveralls_articles (overall_id, koveralls_article_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+    [overallId, ...ids]
+  );
+};
+
 // Shared CTE that computes each overall's latest rating change from history.
 // Only overalls with 2+ history rows produce a non-null change; others get NULL
 // via the LEFT JOINs below rather than being excluded.
@@ -511,13 +530,24 @@ router.get("/slug/:slug/related", async (req, res) => {
     }
     const { id: overallId, artist_tier } = overallResult.rows[0];
 
-    const articlesResult = await pool.query(
-      `SELECT a.* FROM articles a
-       JOIN overall_articles oa ON oa.article_id = a.id
-       WHERE oa.overall_id = $1
-       ORDER BY a.created_at DESC`,
-      [overallId]
-    );
+    const [articlesResult, koverallsArticlesResult] = await Promise.all([
+      pool.query(
+        `SELECT a.* FROM articles a
+         JOIN overall_articles oa ON oa.article_id = a.id
+         WHERE oa.overall_id = $1
+         ORDER BY a.created_at DESC`,
+        [overallId]
+      ),
+      pool.query(
+        `SELECT ka.* FROM koveralls_articles ka
+         JOIN overall_koveralls_articles oka ON oka.koveralls_article_id = ka.id
+         WHERE oka.overall_id = $1
+         ORDER BY ka.created_at DESC`,
+        [overallId]
+      ),
+    ]);
+    const relatedArticles = [...articlesResult.rows, ...koverallsArticlesResult.rows]
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     let relatedArtists = [];
     if (artist_tier) {
@@ -530,7 +560,7 @@ router.get("/slug/:slug/related", async (req, res) => {
       relatedArtists = artistsResult.rows;
     }
 
-    res.json({ articles: articlesResult.rows, artists: relatedArtists });
+    res.json({ articles: relatedArticles, artists: relatedArtists });
   } catch (error) {
     console.error("Error fetching related content:", error);
     res.status(500).json({ error: "Server error" });
@@ -553,7 +583,7 @@ router.post(
     }
 
     try {
-      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids } = req.body;
+      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids, koveralls_article_ids } = req.body;
 
       const tier = VALID_ARTIST_TIERS.includes(artist_tier) ? artist_tier : null;
       const parsedAttributes = parseAttributes(attributes);
@@ -611,6 +641,7 @@ router.post(
       }
 
       await syncOverallArticles(created.id, article_ids);
+      await syncOverallKoverallsArticles(created.id, koveralls_article_ids);
 
       res.status(201).json(created);
     } catch (error) {
@@ -637,7 +668,7 @@ router.put(
 
     try {
       const { id } = req.params;
-      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids } = req.body;
+      const { title, content, overall, instagram_link, artist_tier, location, attributes, article_ids, koveralls_article_ids } = req.body;
 
       // Check if overall exists
       const existingOverall = await pool.query(
@@ -731,6 +762,7 @@ router.put(
       }
 
       await syncOverallArticles(id, article_ids);
+      await syncOverallKoverallsArticles(id, koveralls_article_ids);
 
       res.json(updated);
     } catch (error) {

@@ -17,6 +17,7 @@ import lowkeygridSitemapRoutes from "./routes/lowkeygridSitemap.js";
 import rssRoutes from "./routes/rss.js";
 import overallsRoutes from "./routes/overalls.js";
 import lowkeygridArticlesRoutes from "./routes/lowkeygridArticles.js";
+import koverallsArticlesRoutes from "./routes/koveralls-articles.js";
 import geniusRoutes from "./routes/genius.js";
 import indexerRoutes from "./routes/indexer.js";
 import financeRoutes from "./routes/finance.js";
@@ -245,6 +246,9 @@ app.use("/api/overalls", overallsRoutes);
 
 // LowkeyGrid Articles routes (public GET, protected POST/PUT/DELETE)
 app.use("/api/lowkeygrid/articles", lowkeygridArticlesRoutes);
+
+// Native 2koveralls write-up articles (public GET, protected POST/PUT/DELETE)
+app.use("/api/koveralls-articles", koverallsArticlesRoutes);
 
 // Unified search across overalls, articles, and playlists (public)
 app.use("/api/search", searchRoutes);
