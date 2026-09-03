@@ -283,6 +283,7 @@ router.post(
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { email } = req.body;
+    const source = typeof req.body.source === 'string' ? req.body.source.trim().slice(0, 100) || null : null;
     try {
       const existing = await pool.query(
         "SELECT * FROM newsletter_subscribers WHERE email = $1", [email]
@@ -290,8 +291,8 @@ router.post(
       if (existing.rows.length > 0) {
         if (!existing.rows[0].is_active) {
           await pool.query(
-            "UPDATE newsletter_subscribers SET is_active = true, subscribed_at = CURRENT_TIMESTAMP WHERE email = $1",
-            [email]
+            "UPDATE newsletter_subscribers SET is_active = true, subscribed_at = CURRENT_TIMESTAMP, source = COALESCE($2, source) WHERE email = $1",
+            [email, source]
           );
           return res.status(200).json({ message: "Welcome back! Your subscription has been reactivated." });
         }
@@ -299,9 +300,9 @@ router.post(
       }
 
       const result = await pool.query(
-        `INSERT INTO newsletter_subscribers (email) VALUES ($1)
+        `INSERT INTO newsletter_subscribers (email, source) VALUES ($1, $2)
          RETURNING id, email, subscribed_at, is_active`,
-        [email]
+        [email, source]
       );
       res.status(201).json({
         message: "Successfully subscribed to the newsletter!",
