@@ -194,7 +194,7 @@ router.post(
     }
 
     try {
-      const { title, author, content, tags, category, instagram_link } = req.body;
+      const { title, author, content, tags, category, instagram_link, spotify_url, youtube_url, soundcloud_url } = req.body;
 
       let imageUrl = null;
       let thumbnailUrl = null;
@@ -215,10 +215,10 @@ router.post(
       }
 
       const result = await pool.query(
-        `INSERT INTO koveralls_articles (title, author, content, image_url, thumbnail_url, tags, category, instagram_link)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `INSERT INTO koveralls_articles (title, author, content, image_url, thumbnail_url, tags, category, instagram_link, spotify_url, youtube_url, soundcloud_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING *`,
-        [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null]
+        [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null, spotify_url || null, youtube_url || null, soundcloud_url || null]
       );
 
       res.status(201).json(result.rows[0]);
@@ -246,7 +246,7 @@ router.put(
 
     try {
       const { id } = req.params;
-      const { title, author, content, tags, category, instagram_link } = req.body;
+      const { title, author, content, tags, category, instagram_link, spotify_url, youtube_url, soundcloud_url } = req.body;
 
       const existingArticle = await pool.query(
         "SELECT * FROM koveralls_articles WHERE id = $1",
@@ -279,10 +279,11 @@ router.put(
 
       const result = await pool.query(
         `UPDATE koveralls_articles
-         SET title = $1, author = $2, content = $3, image_url = $4, thumbnail_url = $5, tags = $6, category = $7, instagram_link = $8, updated_at = CURRENT_TIMESTAMP
-         WHERE id = $9
+         SET title = $1, author = $2, content = $3, image_url = $4, thumbnail_url = $5, tags = $6, category = $7, instagram_link = $8,
+             spotify_url = $9, youtube_url = $10, soundcloud_url = $11, updated_at = CURRENT_TIMESTAMP
+         WHERE id = $12
          RETURNING *`,
-        [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null, id]
+        [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null, spotify_url || null, youtube_url || null, soundcloud_url || null, id]
       );
 
       res.json(result.rows[0]);
