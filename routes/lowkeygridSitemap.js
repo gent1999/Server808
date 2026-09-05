@@ -23,7 +23,7 @@ const slugify = (text) => {
  */
 router.get('/lowkeygrid-sitemap.xml', async (req, res) => {
   try {
-    const baseUrl = 'https://www.2koveralls.com';
+    const baseUrl = 'https://2koveralls.com';
 
     // Fetch trends articles (news)
     const trendsResult = await pool.query(
