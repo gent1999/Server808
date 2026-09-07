@@ -87,7 +87,9 @@ router.get('/summary', auth, async (req, res) => {
     const bomlY = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
     const eomlY = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
 
-    const [revRow, expRow, payoutProg, renewals] = await Promise.all([
+    const trendStart = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0];
+
+    const [revRow, expRow, payoutProg, renewals, revByMonth, expByMonth] = await Promise.all([
       pool.query(`
         SELECT
           COALESCE(SUM(gross_amount),0)                                               AS total_gross,
@@ -125,6 +127,25 @@ router.get('/summary', auth, async (req, res) => {
         ORDER BY renewal_date ASC
         LIMIT 10
       `),
+
+      // Last 6 months of revenue, for the Overview trend chart
+      pool.query(`
+        SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
+          COALESCE(SUM(net_amount),0)::float AS revenue
+        FROM revenue_entries
+        WHERE payment_status != 'cancelled' AND date >= $1
+        GROUP BY 1
+      `, [trendStart]),
+
+      // Last 6 months of expenses (grouped by created_at — expenses have no
+      // separate "incurred on" date, same convention as /transactions uses)
+      pool.query(`
+        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+          COALESCE(SUM(amount),0)::float AS expenses
+        FROM expenses
+        WHERE created_at >= $1
+        GROUP BY 1
+      `, [trendStart]),
     ]);
 
     const r          = revRow.rows[0];
@@ -133,6 +154,24 @@ router.get('/summary', auth, async (req, res) => {
     const totalExp   = fmt(e.total);
     const monthRev   = fmt(r.month_rev);
     const monthlyExp = fmt(e.monthly) + fmt(e.yearly_monthly);
+
+    // Build a continuous 6-month scaffold so months with no activity show as
+    // zero bars instead of being skipped in the trend chart.
+    const revByMonthMap = Object.fromEntries(revByMonth.rows.map(x => [x.month, fmt(x.revenue)]));
+    const expByMonthMap = Object.fromEntries(expByMonth.rows.map(x => [x.month, fmt(x.expenses)]));
+    const monthlyTrend = Array.from({ length: 6 }, (_, i) => {
+      const d     = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+      const key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const revenue  = revByMonthMap[key] || 0;
+      const expenses = expByMonthMap[key] || 0;
+      return {
+        month:    key,
+        label:    d.toLocaleDateString('en-US', { month: 'short' }),
+        revenue,
+        expenses,
+        profit:   revenue - expenses,
+      };
+    });
 
     res.json({
       totalGrossRevenue:  fmt(r.total_gross),
@@ -145,6 +184,7 @@ router.get('/summary', auth, async (req, res) => {
       lastMonthRevenue:   fmt(r.last_month_rev),
       currentMonthProfit: monthRev - monthlyExp,
       monthlyExpenses:    monthlyExp,
+      monthlyTrend,
 
       payoutProgressBySource: payoutProg.rows.map(p => {
         const bal  = fmt(p.pending_balance);
