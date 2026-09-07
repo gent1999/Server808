@@ -87,9 +87,7 @@ router.get('/summary', auth, async (req, res) => {
     const bomlY = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
     const eomlY = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
 
-    const trendStart = new Date(now.getFullYear(), now.getMonth() - 5, 1).toISOString().split('T')[0];
-
-    const [revRow, expRow, payoutProg, renewals, revByMonth, expByMonth] = await Promise.all([
+    const [revRow, expRow, payoutProg, renewals] = await Promise.all([
       pool.query(`
         SELECT
           COALESCE(SUM(gross_amount),0)                                               AS total_gross,
@@ -127,25 +125,6 @@ router.get('/summary', auth, async (req, res) => {
         ORDER BY renewal_date ASC
         LIMIT 10
       `),
-
-      // Last 6 months of revenue, for the Overview trend chart
-      pool.query(`
-        SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
-          COALESCE(SUM(net_amount),0)::float AS revenue
-        FROM revenue_entries
-        WHERE payment_status != 'cancelled' AND date >= $1
-        GROUP BY 1
-      `, [trendStart]),
-
-      // Last 6 months of expenses (grouped by created_at — expenses have no
-      // separate "incurred on" date, same convention as /transactions uses)
-      pool.query(`
-        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
-          COALESCE(SUM(amount),0)::float AS expenses
-        FROM expenses
-        WHERE created_at >= $1
-        GROUP BY 1
-      `, [trendStart]),
     ]);
 
     const r          = revRow.rows[0];
@@ -154,24 +133,6 @@ router.get('/summary', auth, async (req, res) => {
     const totalExp   = fmt(e.total);
     const monthRev   = fmt(r.month_rev);
     const monthlyExp = fmt(e.monthly) + fmt(e.yearly_monthly);
-
-    // Build a continuous 6-month scaffold so months with no activity show as
-    // zero bars instead of being skipped in the trend chart.
-    const revByMonthMap = Object.fromEntries(revByMonth.rows.map(x => [x.month, fmt(x.revenue)]));
-    const expByMonthMap = Object.fromEntries(expByMonth.rows.map(x => [x.month, fmt(x.expenses)]));
-    const monthlyTrend = Array.from({ length: 6 }, (_, i) => {
-      const d     = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-      const key   = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const revenue  = revByMonthMap[key] || 0;
-      const expenses = expByMonthMap[key] || 0;
-      return {
-        month:    key,
-        label:    d.toLocaleDateString('en-US', { month: 'short' }),
-        revenue,
-        expenses,
-        profit:   revenue - expenses,
-      };
-    });
 
     res.json({
       totalGrossRevenue:  fmt(r.total_gross),
@@ -184,7 +145,6 @@ router.get('/summary', auth, async (req, res) => {
       lastMonthRevenue:   fmt(r.last_month_rev),
       currentMonthProfit: monthRev - monthlyExp,
       monthlyExpenses:    monthlyExp,
-      monthlyTrend,
 
       payoutProgressBySource: payoutProg.rows.map(p => {
         const bal  = fmt(p.pending_balance);
@@ -211,6 +171,82 @@ router.get('/summary', auth, async (req, res) => {
         daysUntil:   Math.ceil((new Date(e.renewal_date) - new Date()) / 86_400_000),
       })).filter(e => e.daysUntil >= 0 && e.daysUntil <= 90).sort((a, b) => a.daysUntil - b.daysUntil),
     });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ── GET /api/finance/monthly-trend ────────────────────────────────────────────
+// Revenue/expenses per month for the Overview chart. `range` is either
+// 'last12' (rolling 12 months ending this month, the default) or a 4-digit
+// calendar year (e.g. '2025'). availableYears lists every year that actually
+// has data, through the current year, so the UI can build its selector —
+// future years simply aren't offered until they start.
+router.get('/monthly-trend', auth, async (req, res) => {
+  try {
+    const now = new Date();
+    const { range } = req.query;
+    const isYear = /^\d{4}$/.test(range || '');
+
+    const months = isYear
+      ? Array.from({ length: 12 }, (_, i) => ({ year: parseInt(range, 10), month: i + 1 }))
+      : Array.from({ length: 12 }, (_, i) => {
+          const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
+          return { year: d.getFullYear(), month: d.getMonth() + 1 };
+        });
+
+    const start = `${months[0].year}-${String(months[0].month).padStart(2, '0')}-01`;
+    const endOf = months[months.length - 1];
+    const end   = new Date(endOf.year, endOf.month, 0).toISOString().split('T')[0]; // last day of that month
+
+    const [revByMonth, expByMonth, yearsRow] = await Promise.all([
+      pool.query(`
+        SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
+          COALESCE(SUM(net_amount),0)::float AS revenue
+        FROM revenue_entries
+        WHERE payment_status != 'cancelled' AND date >= $1 AND date <= $2
+        GROUP BY 1
+      `, [start, end]),
+
+      // expenses have no separate "incurred on" date column — grouped by
+      // created_at, same convention /transactions uses.
+      pool.query(`
+        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+          COALESCE(SUM(amount),0)::float AS expenses
+        FROM expenses
+        WHERE created_at >= $1 AND created_at <= ($2::date + interval '1 day')
+        GROUP BY 1
+      `, [start, end]),
+
+      pool.query(`
+        SELECT MIN(y)::int AS min_year FROM (
+          SELECT EXTRACT(YEAR FROM date)       AS y FROM revenue_entries
+          UNION ALL
+          SELECT EXTRACT(YEAR FROM created_at) AS y FROM expenses
+        ) years
+      `),
+    ]);
+
+    const revMap = Object.fromEntries(revByMonth.rows.map(x => [x.month, fmt(x.revenue)]));
+    const expMap = Object.fromEntries(expByMonth.rows.map(x => [x.month, fmt(x.expenses)]));
+
+    const trend = months.map(({ year, month }) => {
+      const key      = `${year}-${String(month).padStart(2, '0')}`;
+      const revenue  = revMap[key] || 0;
+      const expenses = expMap[key] || 0;
+      return {
+        month: key,
+        label: new Date(year, month - 1, 1).toLocaleDateString('en-US', { month: 'short' }),
+        year, revenue, expenses,
+        profit: revenue - expenses,
+      };
+    });
+
+    const minYear = yearsRow.rows[0]?.min_year || now.getFullYear();
+    const availableYears = [];
+    for (let y = now.getFullYear(); y >= minYear; y--) availableYears.push(y);
+
+    res.json({ trend, availableYears, range: isYear ? range : 'last12' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
