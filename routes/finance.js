@@ -160,13 +160,16 @@ router.get('/summary', auth, async (req, res) => {
         };
       }),
 
+      // Only genuinely upcoming costs: never surface a past-due/expired renewal
+      // date as an active alert (e.g. a one-time expense or a subscription that
+      // was cancelled/replaced without clearing renewal_date).
       upcomingRenewals: renewals.rows.map(e => ({
         id:          e.id,
         name:        e.name,
         amount:      fmt(e.amount),
         renewalDate: e.renewal_date,
         daysUntil:   Math.ceil((new Date(e.renewal_date) - new Date()) / 86_400_000),
-      })).filter(e => e.daysUntil <= 90).sort((a, b) => a.daysUntil - b.daysUntil),
+      })).filter(e => e.daysUntil >= 0 && e.daysUntil <= 90).sort((a, b) => a.daysUntil - b.daysUntil),
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -227,6 +230,83 @@ router.get('/activity', auth, async (req, res) => {
       LIMIT 15
     `);
     res.json({ activity: rows });
+  } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// ── GET /api/finance/transactions ────────────────────────────────────────────
+// Unified, structured ledger across revenue_entries, payouts, and expenses —
+// powers both the Overview "Recent Activity" list and the Transactions page.
+// Underlying tables stay separate; this just presents them as one stream.
+router.get('/transactions', auth, async (req, res) => {
+  const { type, source_id, from, to, payment_status, limit } = req.query;
+  const where = ['1=1'];
+  const vals  = [];
+  let n = 1;
+  if (type)           { where.push(`kind=$${n++}`);            vals.push(type); }
+  if (source_id)      { where.push(`source_id=$${n++}`);       vals.push(source_id); }
+  if (payment_status) { where.push(`payment_status=$${n++}`);  vals.push(payment_status); }
+  if (from)           { where.push(`date>=$${n++}`);           vals.push(from); }
+  if (to)             { where.push(`date<=$${n++}`);           vals.push(to); }
+
+  const limitClause = limit ? `LIMIT $${n++}` : '';
+  if (limit) vals.push(parseInt(limit, 10) || 15);
+
+  try {
+    const { rows } = await pool.query(`
+      SELECT * FROM (
+        SELECT
+          re.id                                                   AS id,
+          'income'                                                AS kind,
+          re.date                                                 AS date,
+          re.source_id                                            AS source_id,
+          COALESCE(rs.name, 'Unknown')                            AS source_name,
+          COALESCE(re.article_title, re.client_name, 'Revenue')   AS description,
+          re.article_title                                        AS article_title,
+          re.client_name                                          AS client_name,
+          NULL::text                                               AS vendor,
+          NULL::varchar                                            AS category,
+          NULL::varchar                                            AS billing_cycle,
+          NULL::date                                               AS renewal_date,
+          re.gross_amount::float                                  AS gross_amount,
+          re.fee_amount::float                                    AS fee_amount,
+          re.net_amount::float                                    AS net_amount,
+          re.net_amount::float                                    AS amount,
+          re.payment_status                                       AS payment_status,
+          re.payout_status                                        AS payout_status,
+          re.article_url                                          AS article_url,
+          re.notes                                                AS notes,
+          re.created_at                                           AS created_at
+        FROM revenue_entries re
+        LEFT JOIN revenue_sources rs ON re.source_id = rs.id
+
+        UNION ALL
+
+        SELECT
+          p.id, 'payout', p.date, p.source_id,
+          COALESCE(rs.name, 'Unknown'),
+          'Payout received',
+          NULL::text, NULL::text, NULL::text, NULL::varchar, NULL::varchar, NULL::date,
+          NULL::numeric, NULL::numeric, p.amount::float, p.amount::float,
+          'paid', 'complete', NULL::text, p.notes, p.created_at
+        FROM payouts p
+        LEFT JOIN revenue_sources rs ON p.source_id = rs.id
+
+        UNION ALL
+
+        SELECT
+          e.id, 'expense', e.created_at::date, NULL::integer,
+          COALESCE(e.vendor, e.name),
+          e.name,
+          NULL::text, NULL::text, e.vendor, e.category, e.billing_cycle, e.renewal_date,
+          NULL::numeric, NULL::numeric, e.amount::float, (e.amount * -1)::float,
+          e.payment_status, NULL::text, NULL::text, e.notes, e.created_at
+        FROM expenses e
+      ) t
+      WHERE ${where.join(' AND ')}
+      ORDER BY date DESC, created_at DESC
+      ${limitClause}
+    `, vals);
+    res.json({ transactions: rows });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
