@@ -60,28 +60,43 @@ pool.query(`
     updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )
 `)).then(() =>
-  // Seed default revenue sources if table is empty
-  pool.query('SELECT COUNT(*) FROM revenue_sources').then(r => {
+  // Retrofit `site` onto tables that predate multi-site support (Cry808-only
+  // originally). Existing rows default to 'cry808' — 2koveralls starts clean.
+  Promise.all([
+    pool.query(`ALTER TABLE revenue_sources  ADD COLUMN IF NOT EXISTS site VARCHAR(30) NOT NULL DEFAULT 'cry808'`),
+    pool.query(`ALTER TABLE revenue_entries  ADD COLUMN IF NOT EXISTS site VARCHAR(30) NOT NULL DEFAULT 'cry808'`),
+    pool.query(`ALTER TABLE payouts          ADD COLUMN IF NOT EXISTS site VARCHAR(30) NOT NULL DEFAULT 'cry808'`),
+    pool.query(`ALTER TABLE expenses         ADD COLUMN IF NOT EXISTS site VARCHAR(30) NOT NULL DEFAULT 'cry808'`),
+  ])
+).then(() =>
+  // Seed default revenue sources for cry808 only, if it has none yet.
+  // 2koveralls intentionally starts with an empty sources list.
+  pool.query(`SELECT COUNT(*) FROM revenue_sources WHERE site = 'cry808'`).then(r => {
     if (parseInt(r.rows[0].count) === 0) {
       return pool.query(`
-        INSERT INTO revenue_sources (name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes) VALUES
-        ('Fiverr',          'article_sale', 5.00, 'percentage', 20,   0,     'active',  'Fiverr gig — $5 gross, 20% fee = $4 net'),
-        ('OneSubmit',       'article_sale', 3.00, 'none',       0,    50.00, 'active',  '$3 per article, payout threshold $50'),
-        ('Adsterra',        'ad_network',   0,    'none',       0,    5.00,  'active',  'Display/pop ads'),
-        ('Hilltop Ads',     'ad_network',   0,    'none',       0,    5.00,  'active',  'Pop/display ad network'),
-        ('Google Ads',      'ad_network',   0,    'none',       0,    100.00,'pending', 'Pending approval'),
-        ('Direct / Manual', 'manual',       0,    'none',       0,    0,     'active',  'Manual or direct payments')
+        INSERT INTO revenue_sources (site, name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes) VALUES
+        ('cry808', 'Fiverr',          'article_sale', 5.00, 'percentage', 20,   0,     'active',  'Fiverr gig — $5 gross, 20% fee = $4 net'),
+        ('cry808', 'OneSubmit',       'article_sale', 3.00, 'none',       0,    50.00, 'active',  '$3 per article, payout threshold $50'),
+        ('cry808', 'Adsterra',        'ad_network',   0,    'none',       0,    5.00,  'active',  'Display/pop ads'),
+        ('cry808', 'Hilltop Ads',     'ad_network',   0,    'none',       0,    5.00,  'active',  'Pop/display ad network'),
+        ('cry808', 'Google Ads',      'ad_network',   0,    'none',       0,    100.00,'pending', 'Pending approval'),
+        ('cry808', 'Direct / Manual', 'manual',       0,    'none',       0,    0,     'active',  'Manual or direct payments')
       `);
     }
   })
 ).catch(err => console.error('[Finance] Schema init error:', err.message));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-const fmt = v => parseFloat(v || 0);
+const fmt  = v => parseFloat(v || 0);
+// Every route is shared across sites (cry808, lowkeygrid, ...) via this one
+// query/body param — same convention as /api/spotify-embeds and
+// /api/analytics/visitors elsewhere in this file's sibling routes.
+const siteOf = req => req.query.site || req.body?.site || 'cry808';
 
 // ── GET /api/finance/summary ──────────────────────────────────────────────────
 router.get('/summary', auth, async (req, res) => {
   try {
+    const site  = siteOf(req);
     const now   = new Date();
     const bom   = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
     const bomlY = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
@@ -94,18 +109,18 @@ router.get('/summary', auth, async (req, res) => {
           COALESCE(SUM(net_amount),0)                                                 AS total_net,
           COALESCE(SUM(CASE WHEN payment_status='paid'    THEN net_amount ELSE 0 END),0) AS paid_rev,
           COALESCE(SUM(CASE WHEN payment_status='pending' THEN net_amount ELSE 0 END),0) AS pending_rev,
-          COALESCE(SUM(CASE WHEN date >= $1 THEN net_amount ELSE 0 END),0)            AS month_rev,
-          COALESCE(SUM(CASE WHEN date >= $2 AND date <= $3 THEN net_amount ELSE 0 END),0) AS last_month_rev
-        FROM revenue_entries WHERE payment_status != 'cancelled'
-      `, [bom, bomlY, eomlY]),
+          COALESCE(SUM(CASE WHEN date >= $2 THEN net_amount ELSE 0 END),0)            AS month_rev,
+          COALESCE(SUM(CASE WHEN date >= $3 AND date <= $4 THEN net_amount ELSE 0 END),0) AS last_month_rev
+        FROM revenue_entries WHERE site = $1 AND payment_status != 'cancelled'
+      `, [site, bom, bomlY, eomlY]),
 
       pool.query(`
         SELECT
           COALESCE(SUM(amount),0) AS total,
           COALESCE(SUM(CASE WHEN billing_cycle='monthly' THEN amount ELSE 0 END),0) AS monthly,
           COALESCE(SUM(CASE WHEN billing_cycle='yearly'  THEN amount/12.0 ELSE 0 END),0) AS yearly_monthly
-        FROM expenses
-      `),
+        FROM expenses WHERE site = $1
+      `, [site]),
 
       pool.query(`
         SELECT rs.id, rs.name, rs.payout_threshold,
@@ -113,18 +128,18 @@ router.get('/summary', auth, async (req, res) => {
         FROM revenue_sources rs
         LEFT JOIN revenue_entries re
           ON re.source_id = rs.id AND re.payout_status = 'not_ready' AND re.payment_status != 'cancelled'
-        WHERE rs.payout_threshold > 0
+        WHERE rs.site = $1 AND rs.payout_threshold > 0
         GROUP BY rs.id, rs.name, rs.payout_threshold
         ORDER BY rs.name
-      `),
+      `, [site]),
 
       pool.query(`
         SELECT id, name, amount, renewal_date
         FROM expenses
-        WHERE renewal_date IS NOT NULL
+        WHERE site = $1 AND renewal_date IS NOT NULL
         ORDER BY renewal_date ASC
         LIMIT 10
-      `),
+      `, [site]),
     ]);
 
     const r          = revRow.rows[0];
@@ -184,6 +199,7 @@ router.get('/summary', auth, async (req, res) => {
 // future years simply aren't offered until they start.
 router.get('/monthly-trend', auth, async (req, res) => {
   try {
+    const site = siteOf(req);
     const now = new Date();
     const { range } = req.query;
     const isYear = /^\d{4}$/.test(range || '');
@@ -204,9 +220,9 @@ router.get('/monthly-trend', auth, async (req, res) => {
         SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
           COALESCE(SUM(net_amount),0)::float AS revenue
         FROM revenue_entries
-        WHERE payment_status != 'cancelled' AND date >= $1 AND date <= $2
+        WHERE site = $1 AND payment_status != 'cancelled' AND date >= $2 AND date <= $3
         GROUP BY 1
-      `, [start, end]),
+      `, [site, start, end]),
 
       // expenses have no separate "incurred on" date column — grouped by
       // created_at, same convention /transactions uses.
@@ -214,17 +230,17 @@ router.get('/monthly-trend', auth, async (req, res) => {
         SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
           COALESCE(SUM(amount),0)::float AS expenses
         FROM expenses
-        WHERE created_at >= $1 AND created_at <= ($2::date + interval '1 day')
+        WHERE site = $1 AND created_at >= $2 AND created_at <= ($3::date + interval '1 day')
         GROUP BY 1
-      `, [start, end]),
+      `, [site, start, end]),
 
       pool.query(`
         SELECT MIN(y)::int AS min_year FROM (
-          SELECT EXTRACT(YEAR FROM date)       AS y FROM revenue_entries
+          SELECT EXTRACT(YEAR FROM date)       AS y FROM revenue_entries WHERE site = $1
           UNION ALL
-          SELECT EXTRACT(YEAR FROM created_at) AS y FROM expenses
+          SELECT EXTRACT(YEAR FROM created_at) AS y FROM expenses WHERE site = $1
         ) years
-      `),
+      `, [site]),
     ]);
 
     const revMap = Object.fromEntries(revByMonth.rows.map(x => [x.month, fmt(x.revenue)]));
@@ -255,6 +271,7 @@ router.get('/monthly-trend', auth, async (req, res) => {
 // ── Revenue Sources CRUD ──────────────────────────────────────────────────────
 router.get('/sources', auth, async (req, res) => {
   try {
+    const site = siteOf(req);
     const { rows } = await pool.query(
       `SELECT rs.*,
         COALESCE((SELECT SUM(re.net_amount) FROM revenue_entries re
@@ -267,7 +284,8 @@ router.get('/sources', auth, async (req, res) => {
          WHERE re.source_id = rs.id)                                    AS entry_count,
         (SELECT MAX(re.date) FROM revenue_entries re
          WHERE re.source_id = rs.id)                                    AS last_entry_date
-       FROM revenue_sources rs ORDER BY rs.id`
+       FROM revenue_sources rs WHERE rs.site = $1 ORDER BY rs.id`,
+      [site]
     );
     res.json({ sources: rows });
   } catch (err) { res.status(500).json({ message: err.message }); }
@@ -277,6 +295,7 @@ router.get('/sources', auth, async (req, res) => {
 // Combined recent activity feed across entries, payouts, and expenses
 router.get('/activity', auth, async (req, res) => {
   try {
+    const site = siteOf(req);
     const { rows } = await pool.query(`
       SELECT * FROM (
         SELECT 'revenue' AS kind,
@@ -287,6 +306,7 @@ router.get('/activity', auth, async (req, res) => {
           re.payment_status AS status
         FROM revenue_entries re
         LEFT JOIN revenue_sources rs ON re.source_id = rs.id
+        WHERE re.site = $1
         UNION ALL
         SELECT 'payout' AS kind,
           p.id, p.created_at,
@@ -294,6 +314,7 @@ router.get('/activity', auth, async (req, res) => {
           p.amount::float AS amount, '' AS detail, 'paid' AS status
         FROM payouts p
         LEFT JOIN revenue_sources rs ON p.source_id = rs.id
+        WHERE p.site = $1
         UNION ALL
         SELECT 'expense' AS kind,
           e.id, e.created_at,
@@ -301,10 +322,11 @@ router.get('/activity', auth, async (req, res) => {
           e.amount::float AS amount,
           COALESCE(e.vendor,'') AS detail, e.payment_status AS status
         FROM expenses e
+        WHERE e.site = $1
       ) combined
       ORDER BY created_at DESC
       LIMIT 15
-    `);
+    `, [site]);
     res.json({ activity: rows });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
@@ -314,10 +336,11 @@ router.get('/activity', auth, async (req, res) => {
 // powers both the Overview "Recent Activity" list and the Transactions page.
 // Underlying tables stay separate; this just presents them as one stream.
 router.get('/transactions', auth, async (req, res) => {
+  const site = siteOf(req);
   const { type, source_id, from, to, payment_status, limit } = req.query;
-  const where = ['1=1'];
-  const vals  = [];
-  let n = 1;
+  const where = ['site=$1'];
+  const vals  = [site];
+  let n = 2;
   if (type)           { where.push(`kind=$${n++}`);            vals.push(type); }
   if (source_id)      { where.push(`source_id=$${n++}`);       vals.push(source_id); }
   if (payment_status) { where.push(`payment_status=$${n++}`);  vals.push(payment_status); }
@@ -333,6 +356,7 @@ router.get('/transactions', auth, async (req, res) => {
         SELECT
           re.id                                                   AS id,
           'income'                                                AS kind,
+          re.site                                                 AS site,
           re.date                                                 AS date,
           re.source_id                                            AS source_id,
           COALESCE(rs.name, 'Unknown')                            AS source_name,
@@ -358,7 +382,7 @@ router.get('/transactions', auth, async (req, res) => {
         UNION ALL
 
         SELECT
-          p.id, 'payout', p.date, p.source_id,
+          p.id, 'payout', p.site, p.date, p.source_id,
           COALESCE(rs.name, 'Unknown'),
           'Payout received',
           NULL::text, NULL::text, NULL::text, NULL::varchar, NULL::varchar, NULL::date,
@@ -370,7 +394,7 @@ router.get('/transactions', auth, async (req, res) => {
         UNION ALL
 
         SELECT
-          e.id, 'expense', e.created_at::date, NULL::integer,
+          e.id, 'expense', e.site, e.created_at::date, NULL::integer,
           COALESCE(e.vendor, e.name),
           e.name,
           NULL::text, NULL::text, e.vendor, e.category, e.billing_cycle, e.renewal_date,
@@ -387,26 +411,28 @@ router.get('/transactions', auth, async (req, res) => {
 });
 
 router.post('/sources', auth, async (req, res) => {
+  const site = siteOf(req);
   const { name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes } = req.body;
   if (!name) return res.status(400).json({ message: 'name required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO revenue_sources (name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [name, type||'manual', default_gross||0, fee_type||'none', fee_value||0, payout_threshold||0, status||'active', notes||null]
+      `INSERT INTO revenue_sources (site, name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [site, name, type||'manual', default_gross||0, fee_type||'none', fee_value||0, payout_threshold||0, status||'active', notes||null]
     );
     res.status(201).json({ source: rows[0] });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
 router.put('/sources/:id', auth, async (req, res) => {
+  const site = siteOf(req);
   const { id } = req.params;
   const { name, type, default_gross, fee_type, fee_value, payout_threshold, status, notes } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE revenue_sources SET name=$1, type=$2, default_gross=$3, fee_type=$4, fee_value=$5,
-         payout_threshold=$6, status=$7, notes=$8, updated_at=NOW() WHERE id=$9 RETURNING *`,
-      [name, type, default_gross||0, fee_type, fee_value||0, payout_threshold||0, status, notes||null, id]
+         payout_threshold=$6, status=$7, notes=$8, updated_at=NOW() WHERE id=$9 AND site=$10 RETURNING *`,
+      [name, type, default_gross||0, fee_type, fee_value||0, payout_threshold||0, status, notes||null, id, site]
     );
     if (!rows.length) return res.status(404).json({ message: 'not found' });
     res.json({ source: rows[0] });
@@ -415,17 +441,18 @@ router.put('/sources/:id', auth, async (req, res) => {
 
 router.delete('/sources/:id', auth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM revenue_sources WHERE id=$1', [req.params.id]);
+    await pool.query('DELETE FROM revenue_sources WHERE id=$1 AND site=$2', [req.params.id, siteOf(req)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
 // ── Revenue Entries CRUD ──────────────────────────────────────────────────────
 router.get('/entries', auth, async (req, res) => {
+  const site = siteOf(req);
   const { source_id, payment_status, payout_status, from, to } = req.query;
-  const where = ['1=1'];
-  const vals  = [];
-  let n = 1;
+  const where = ['re.site=$1'];
+  const vals  = [site];
+  let n = 2;
   if (source_id)      { where.push(`re.source_id=$${n++}`);      vals.push(source_id); }
   if (payment_status) { where.push(`re.payment_status=$${n++}`); vals.push(payment_status); }
   if (payout_status)  { where.push(`re.payout_status=$${n++}`);  vals.push(payout_status); }
@@ -452,15 +479,16 @@ router.get('/entries', auth, async (req, res) => {
 });
 
 router.post('/entries', auth, async (req, res) => {
+  const site = siteOf(req);
   const { date, source_id, article_title, article_url, client_name,
           gross_amount, fee_amount, net_amount, payment_status, payout_status, notes } = req.body;
   try {
     const { rows } = await pool.query(
       `INSERT INTO revenue_entries
-        (date, source_id, article_title, article_url, client_name,
+        (site, date, source_id, article_title, article_url, client_name,
          gross_amount, fee_amount, net_amount, payment_status, payout_status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [date||new Date().toISOString().split('T')[0], source_id||null,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [site, date||new Date().toISOString().split('T')[0], source_id||null,
        article_title||null, article_url||null, client_name||null,
        gross_amount||0, fee_amount||0, net_amount||0,
        payment_status||'pending', payout_status||'not_ready', notes||null]
@@ -470,6 +498,7 @@ router.post('/entries', auth, async (req, res) => {
 });
 
 router.put('/entries/:id', auth, async (req, res) => {
+  const site = siteOf(req);
   const { id } = req.params;
   const { date, source_id, article_title, article_url, client_name,
           gross_amount, fee_amount, net_amount, payment_status, payout_status, notes } = req.body;
@@ -479,10 +508,10 @@ router.put('/entries/:id', auth, async (req, res) => {
         date=$1, source_id=$2, article_title=$3, article_url=$4, client_name=$5,
         gross_amount=$6, fee_amount=$7, net_amount=$8, payment_status=$9,
         payout_status=$10, notes=$11, updated_at=NOW()
-       WHERE id=$12 RETURNING *`,
+       WHERE id=$12 AND site=$13 RETURNING *`,
       [date, source_id||null, article_title||null, article_url||null, client_name||null,
        gross_amount||0, fee_amount||0, net_amount||0,
-       payment_status, payout_status, notes||null, id]
+       payment_status, payout_status, notes||null, id, site]
     );
     if (!rows.length) return res.status(404).json({ message: 'not found' });
     res.json({ entry: rows[0] });
@@ -491,7 +520,7 @@ router.put('/entries/:id', auth, async (req, res) => {
 
 router.delete('/entries/:id', auth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM revenue_entries WHERE id=$1', [req.params.id]);
+    await pool.query('DELETE FROM revenue_entries WHERE id=$1 AND site=$2', [req.params.id, siteOf(req)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
@@ -502,26 +531,29 @@ router.get('/payouts', auth, async (req, res) => {
     const { rows } = await pool.query(
       `SELECT p.*, rs.name AS source_name
        FROM payouts p LEFT JOIN revenue_sources rs ON p.source_id = rs.id
-       ORDER BY p.date DESC, p.created_at DESC`
+       WHERE p.site=$1
+       ORDER BY p.date DESC, p.created_at DESC`,
+      [siteOf(req)]
     );
     res.json({ payouts: rows });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
 router.post('/payouts', auth, async (req, res) => {
+  const site = siteOf(req);
   const { source_id, amount, date, notes, mark_entries_paid } = req.body;
   if (!amount || !source_id) return res.status(400).json({ message: 'source_id and amount required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO payouts (source_id, amount, date, notes) VALUES ($1,$2,$3,$4) RETURNING *`,
-      [source_id, amount, date||new Date().toISOString().split('T')[0], notes||null]
+      `INSERT INTO payouts (site, source_id, amount, date, notes) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      [site, source_id, amount, date||new Date().toISOString().split('T')[0], notes||null]
     );
     // Optionally mark related not_ready entries as paid_out
     if (mark_entries_paid) {
       await pool.query(
         `UPDATE revenue_entries SET payout_status='paid_out', updated_at=NOW()
-         WHERE source_id=$1 AND payout_status='not_ready'`,
-        [source_id]
+         WHERE source_id=$1 AND site=$2 AND payout_status='not_ready'`,
+        [source_id, site]
       );
     }
     res.status(201).json({ payout: rows[0] });
@@ -530,7 +562,7 @@ router.post('/payouts', auth, async (req, res) => {
 
 router.delete('/payouts/:id', auth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM payouts WHERE id=$1', [req.params.id]);
+    await pool.query('DELETE FROM payouts WHERE id=$1 AND site=$2', [req.params.id, siteOf(req)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
@@ -542,7 +574,8 @@ router.get('/expenses', auth, async (req, res) => {
       `SELECT *, CASE WHEN renewal_date IS NOT NULL
          THEN (renewal_date - CURRENT_DATE)
          ELSE NULL END AS days_until_renewal
-       FROM expenses ORDER BY renewal_date ASC NULLS LAST, created_at DESC`
+       FROM expenses WHERE site=$1 ORDER BY renewal_date ASC NULLS LAST, created_at DESC`,
+      [siteOf(req)]
     );
     const totals = rows.reduce((acc, e) => {
       acc.total += fmt(e.amount);
@@ -555,13 +588,14 @@ router.get('/expenses', auth, async (req, res) => {
 });
 
 router.post('/expenses', auth, async (req, res) => {
+  const site = siteOf(req);
   const { name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes } = req.body;
   if (!name) return res.status(400).json({ message: 'name required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO expenses (name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
-      [name, category||'other', amount||0, billing_cycle||'one_time',
+      `INSERT INTO expenses (site, name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [site, name, category||'other', amount||0, billing_cycle||'one_time',
        vendor||null, renewal_date||null, payment_status||'paid', notes||null]
     );
     res.status(201).json({ expense: rows[0] });
@@ -569,15 +603,16 @@ router.post('/expenses', auth, async (req, res) => {
 });
 
 router.put('/expenses/:id', auth, async (req, res) => {
+  const site = siteOf(req);
   const { id } = req.params;
   const { name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE expenses SET name=$1, category=$2, amount=$3, billing_cycle=$4, vendor=$5,
          renewal_date=$6, payment_status=$7, notes=$8, updated_at=NOW()
-       WHERE id=$9 RETURNING *`,
+       WHERE id=$9 AND site=$10 RETURNING *`,
       [name, category||'other', amount||0, billing_cycle||'one_time',
-       vendor||null, renewal_date||null, payment_status||'paid', notes||null, id]
+       vendor||null, renewal_date||null, payment_status||'paid', notes||null, id, site]
     );
     if (!rows.length) return res.status(404).json({ message: 'not found' });
     res.json({ expense: rows[0] });
@@ -586,7 +621,7 @@ router.put('/expenses/:id', auth, async (req, res) => {
 
 router.delete('/expenses/:id', auth, async (req, res) => {
   try {
-    await pool.query('DELETE FROM expenses WHERE id=$1', [req.params.id]);
+    await pool.query('DELETE FROM expenses WHERE id=$1 AND site=$2', [req.params.id, siteOf(req)]);
     res.json({ ok: true });
   } catch (err) { res.status(500).json({ message: err.message }); }
 });
