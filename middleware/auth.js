@@ -10,14 +10,21 @@ const authMiddleware = async (req, res, next) => {
     return res.status(401).json({ message: "No token, authorization denied" });
   }
 
+  // A malformed/expired token is genuinely a 401. A DB hiccup (e.g. a Neon
+  // cold-start timeout) verifying the admin afterward is not the same thing
+  // and must never be reported as an invalid token — that misleads clients
+  // into wiping out a perfectly good session over a transient blip.
+  let decoded;
   try {
-    // Verify token
-    const decoded = jwt.verify(
+    decoded = jwt.verify(
       token,
       process.env.JWT_SECRET || "your_jwt_secret_key_change_this"
     );
+  } catch (error) {
+    return res.status(401).json({ message: "Token is not valid" });
+  }
 
-    // Verify admin exists in database
+  try {
     const result = await pool.query(
       'SELECT id, username, email, created_at FROM admins WHERE id = $1',
       [decoded.admin.id]
@@ -31,7 +38,7 @@ const authMiddleware = async (req, res, next) => {
     req.admin = result.rows[0];
     next();
   } catch (error) {
-    res.status(401).json({ message: "Token is not valid" });
+    res.status(503).json({ message: "Temporarily unavailable, please try again" });
   }
 };
 
