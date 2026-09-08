@@ -66,6 +66,11 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,PATCH,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With,X-808-API-KEY');
     res.setHeader('Access-Control-Max-Age', '86400'); // 24 h preflight cache
+    // Belt-and-suspenders: some edge/CDN layers cache a GET response keyed only
+    // by URL and don't honor Vary: Origin, which can serve a response (and its
+    // Access-Control-Allow-Origin header) generated for one site's origin back
+    // to a request from another allowed origin. Never let that get cached.
+    res.setHeader('Cache-Control', 'no-store');
   }
 
   // Respond immediately to OPTIONS preflight — no further middleware needed.
