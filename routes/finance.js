@@ -69,6 +69,14 @@ pool.query(`
     pool.query(`ALTER TABLE expenses         ADD COLUMN IF NOT EXISTS site VARCHAR(30) NOT NULL DEFAULT 'cry808'`),
   ])
 ).then(() =>
+  // Expenses only ever had renewal_date (a future/recurring date) and the
+  // auto-set, non-editable created_at. Add a real, editable "date the
+  // expense was made" — backfill existing rows from created_at so nothing
+  // goes blank.
+  pool.query(`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS date DATE`)
+    .then(() => pool.query(`UPDATE expenses SET date = created_at::date WHERE date IS NULL`))
+    .then(() => pool.query(`ALTER TABLE expenses ALTER COLUMN date SET DEFAULT CURRENT_DATE`))
+).then(() =>
   // Seed default revenue sources for cry808 only, if it has none yet.
   // 2koveralls intentionally starts with an empty sources list.
   pool.query(`SELECT COUNT(*) FROM revenue_sources WHERE site = 'cry808'`).then(r => {
@@ -224,21 +232,19 @@ router.get('/monthly-trend', auth, async (req, res) => {
         GROUP BY 1
       `, [site, start, end]),
 
-      // expenses have no separate "incurred on" date column — grouped by
-      // created_at, same convention /transactions uses.
       pool.query(`
-        SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month,
+        SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
           COALESCE(SUM(amount),0)::float AS expenses
         FROM expenses
-        WHERE site = $1 AND created_at >= $2 AND created_at <= ($3::date + interval '1 day')
+        WHERE site = $1 AND date >= $2 AND date <= $3
         GROUP BY 1
       `, [site, start, end]),
 
       pool.query(`
         SELECT MIN(y)::int AS min_year FROM (
-          SELECT EXTRACT(YEAR FROM date)       AS y FROM revenue_entries WHERE site = $1
+          SELECT EXTRACT(YEAR FROM date) AS y FROM revenue_entries WHERE site = $1
           UNION ALL
-          SELECT EXTRACT(YEAR FROM created_at) AS y FROM expenses WHERE site = $1
+          SELECT EXTRACT(YEAR FROM date) AS y FROM expenses WHERE site = $1
         ) years
       `, [site]),
     ]);
@@ -394,7 +400,7 @@ router.get('/transactions', auth, async (req, res) => {
         UNION ALL
 
         SELECT
-          e.id, 'expense', e.site, e.created_at::date, NULL::integer,
+          e.id, 'expense', e.site, e.date, NULL::integer,
           COALESCE(e.vendor, e.name),
           e.name,
           NULL::text, NULL::text, e.vendor, e.category, e.billing_cycle, e.renewal_date,
@@ -589,14 +595,14 @@ router.get('/expenses', auth, async (req, res) => {
 
 router.post('/expenses', auth, async (req, res) => {
   const site = siteOf(req);
-  const { name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes } = req.body;
+  const { name, category, amount, billing_cycle, vendor, date, renewal_date, payment_status, notes } = req.body;
   if (!name) return res.status(400).json({ message: 'name required' });
   try {
     const { rows } = await pool.query(
-      `INSERT INTO expenses (site, name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      `INSERT INTO expenses (site, name, category, amount, billing_cycle, vendor, date, renewal_date, payment_status, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
       [site, name, category||'other', amount||0, billing_cycle||'one_time',
-       vendor||null, renewal_date||null, payment_status||'paid', notes||null]
+       vendor||null, date||new Date().toISOString().split('T')[0], renewal_date||null, payment_status||'paid', notes||null]
     );
     res.status(201).json({ expense: rows[0] });
   } catch (err) { res.status(500).json({ message: err.message }); }
@@ -605,14 +611,14 @@ router.post('/expenses', auth, async (req, res) => {
 router.put('/expenses/:id', auth, async (req, res) => {
   const site = siteOf(req);
   const { id } = req.params;
-  const { name, category, amount, billing_cycle, vendor, renewal_date, payment_status, notes } = req.body;
+  const { name, category, amount, billing_cycle, vendor, date, renewal_date, payment_status, notes } = req.body;
   try {
     const { rows } = await pool.query(
       `UPDATE expenses SET name=$1, category=$2, amount=$3, billing_cycle=$4, vendor=$5,
-         renewal_date=$6, payment_status=$7, notes=$8, updated_at=NOW()
-       WHERE id=$9 AND site=$10 RETURNING *`,
+         date=$6, renewal_date=$7, payment_status=$8, notes=$9, updated_at=NOW()
+       WHERE id=$10 AND site=$11 RETURNING *`,
       [name, category||'other', amount||0, billing_cycle||'one_time',
-       vendor||null, renewal_date||null, payment_status||'paid', notes||null, id, site]
+       vendor||null, date||new Date().toISOString().split('T')[0], renewal_date||null, payment_status||'paid', notes||null, id, site]
     );
     if (!rows.length) return res.status(404).json({ message: 'not found' });
     res.json({ expense: rows[0] });
