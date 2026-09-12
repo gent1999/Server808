@@ -1,7 +1,9 @@
 import { purgeUrls } from './cloudflarePurge.js';
 
 // Cry808's own public route structure — deliberately not shared with
-// lowkeygrid/2koveralls, which have entirely separate pages and purge needs.
+// lowkeygrid/2koveralls, which have entirely separate pages, zones, and
+// purge needs (see cloudflarePurge.js's SITES map).
+const SITE = 'cry808';
 const SITE_URL = 'https://cry808.com';
 
 const LISTING_PAGES = [
@@ -32,7 +34,7 @@ function articleUrl(article) {
  * A new article went live — purge the listing pages plus its own URL.
  */
 export function purgeArticleCreated(article) {
-  return purgeUrls([...LISTING_PAGES, articleUrl(article)]);
+  return purgeUrls(SITE, [...LISTING_PAGES, articleUrl(article)]);
 }
 
 /**
@@ -40,7 +42,7 @@ export function purgeArticleCreated(article) {
  * occupy, so it stops showing up anywhere immediately.
  */
 export function purgeArticleDeleted(article) {
-  return purgeUrls([...LISTING_PAGES, articleUrl(article)]);
+  return purgeUrls(SITE, [...LISTING_PAGES, articleUrl(article)]);
 }
 
 /**
@@ -49,12 +51,12 @@ export function purgeArticleDeleted(article) {
  * under the old slug/category never lingers.
  */
 export function purgeArticleUpdated(before, after) {
-  return purgeUrls([...LISTING_PAGES, articleUrl(before), articleUrl(after)]);
+  return purgeUrls(SITE, [...LISTING_PAGES, articleUrl(before), articleUrl(after)]);
 }
 
 /**
  * Feature-carousel toggle — only the home page's carousel is affected.
  */
 export function purgeHome() {
-  return purgeUrls([`${SITE_URL}/`]);
+  return purgeUrls(SITE, [`${SITE_URL}/`]);
 }
