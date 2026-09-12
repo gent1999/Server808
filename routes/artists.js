@@ -83,6 +83,7 @@ function toSlug(name) {
 router.get('/', async (req, res) => {
   try {
     const { rows } = await pool.query('SELECT * FROM artists ORDER BY name ASC');
+    res.set('Cache-Control', 'public, s-maxage=120, stale-while-revalidate=600');
     res.json({ artists: rows });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -107,6 +108,7 @@ router.get('/:slug', async (req, res) => {
       [artist.id]
     );
 
+    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
     res.json({ artist, articles });
   } catch (err) {
     res.status(500).json({ message: err.message });

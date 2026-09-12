@@ -80,6 +80,8 @@ router.put("/", auth, async (req, res) => {
 // @desc    Get public settings (for frontend config)
 // @access  Public
 router.get("/public", async (req, res) => {
+  res.set('Cache-Control', `public, s-maxage=${SETTINGS_PUBLIC_TTL}, stale-while-revalidate=600`);
+
   // Serve from cache — this is called on every page load
   const cached = getCached(SETTINGS_PUBLIC_KEY);
   if (cached) return res.json(cached);

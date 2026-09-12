@@ -8,6 +8,7 @@ import auth from "../middleware/auth.js";
 import { pingSitemap, requestIndexing } from "../utils/sitemapPing.js";
 import fetch from "node-fetch";
 import { getCached, setCached, bustCache } from "../utils/cache.js";
+import { purgeArticleCreated, purgeArticleUpdated, purgeArticleDeleted } from "../utils/cry808Purge.js";
 
 const router = express.Router();
 
@@ -242,6 +243,7 @@ router.post(
       ).catch(err => console.error('[Indexer] Failed to queue index event:', err.message));
 
       bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
+      await purgeArticleCreated(newArticle);
       res.status(201).json({
         message: "Article created successfully",
         article: newArticle
@@ -257,6 +259,8 @@ router.post(
 // @desc    Get all articles
 // @access  Public
 router.get("/", async (req, res) => {
+  res.set('Cache-Control', `public, s-maxage=${ARTICLES_TTL}, stale-while-revalidate=300`);
+
   const cached = getCached(ARTICLES_KEY);
   if (cached) return res.json(cached);
 
@@ -278,6 +282,8 @@ router.get("/", async (req, res) => {
 // @desc    Get all featured articles for carousel (up to 5), falls back to 3 latest
 // @access  Public
 router.get("/featured/article", async (req, res) => {
+  res.set('Cache-Control', `public, s-maxage=${ARTICLES_TTL}, stale-while-revalidate=300`);
+
   const cached = getCached(ARTICLES_FEATURED);
   if (cached) return res.json(cached);
 
@@ -370,6 +376,7 @@ router.get("/:id", async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
+    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=3600');
     res.json({
       article: result.rows[0]
     });
@@ -540,6 +547,7 @@ router.put(
       pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
       bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
+      await purgeArticleUpdated(existingArticle, result.rows[0]);
       res.json({
         message: "Article updated successfully",
         article: result.rows[0]
@@ -611,6 +619,7 @@ router.delete("/:id", auth, async (req, res) => {
     pingSitemap().catch(err => console.error('Sitemap ping error:', err));
 
     bustCache(ARTICLES_KEY, ARTICLES_FEATURED);
+    await purgeArticleDeleted(article);
     res.json({
       message: "Article deleted successfully",
       article: result.rows[0]

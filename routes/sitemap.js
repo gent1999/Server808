@@ -99,6 +99,7 @@ router.get('/sitemap.xml', async (req, res) => {
 
     // Set proper headers for XML
     res.header('Content-Type', 'application/xml');
+    res.header('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
     res.send(xml);
   } catch (error) {
     console.error('Error generating sitemap:', error);

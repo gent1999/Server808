@@ -49,6 +49,7 @@ router.get('/', async (req, res) => {
     query += ' ORDER BY display_order ASC, created_at DESC';
 
     const result = await pool.query(query, params);
+    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
     res.json({ embeds: result.rows });
   } catch (error) {
     console.error('Error fetching Spotify embeds:', error);
@@ -89,6 +90,7 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ message: 'Spotify embed not found' });
     }
 
+    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
     res.json({ embed: result.rows[0] });
   } catch (error) {
     console.error('Error fetching Spotify embed:', error);

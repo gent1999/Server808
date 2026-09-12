@@ -1,7 +1,13 @@
 import express from "express";
 import pool from "../config/db.js";
+import { bustCache } from "../utils/cache.js";
+import { purgeHome } from "../utils/cry808Purge.js";
 
 const router = express.Router();
+
+// Must match ARTICLES_FEATURED in routes/articles.js — the featured-carousel
+// endpoint's in-memory cache key, which this route mutates but doesn't own.
+const ARTICLES_FEATURED_KEY = 'articles:featured';
 
 const MAX_FEATURED = 5;
 
@@ -39,6 +45,8 @@ router.put("/:id", async (req, res) => {
       [id]
     );
 
+    bustCache(ARTICLES_FEATURED_KEY);
+    await purgeHome();
     res.json({
       message: "Article added to featured carousel",
       article: result.rows[0]
@@ -65,6 +73,8 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ message: "Article not found" });
     }
 
+    bustCache(ARTICLES_FEATURED_KEY);
+    await purgeHome();
     res.json({
       message: "Article removed from featured carousel",
       article: result.rows[0]

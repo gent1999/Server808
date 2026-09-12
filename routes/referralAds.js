@@ -47,6 +47,7 @@ router.get('/', async (req, res) => {
        WHERE is_active = true
        ORDER BY display_order ASC, created_at DESC`
     );
+    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
     res.json({ ads: rows });
   } catch (e) {
     res.status(500).json({ message: e.message });
