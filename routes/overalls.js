@@ -5,6 +5,7 @@ import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { Readable } from "stream";
 import auth from "../middleware/auth.js";
+import { purgeOverallCreated, purgeOverallUpdated, purgeOverallDeleted, purgeHome } from "../utils/koverallsPurge.js";
 
 const router = express.Router();
 
@@ -326,6 +327,7 @@ router.put("/:id/hero-feature", auth, async (req, res) => {
       [id]
     );
 
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error setting hero featured:", error);
@@ -344,6 +346,7 @@ router.delete("/:id/hero-feature", auth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Overall not found" });
     }
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error removing hero featured:", error);
@@ -378,6 +381,7 @@ router.put("/:id/square-feature", auth, async (req, res) => {
       [id]
     );
 
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error setting square featured:", error);
@@ -396,6 +400,7 @@ router.delete("/:id/square-feature", auth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Overall not found" });
     }
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error removing square featured:", error);
@@ -643,6 +648,7 @@ router.post(
       await syncOverallArticles(created.id, article_ids);
       await syncOverallKoverallsArticles(created.id, koveralls_article_ids);
 
+      await purgeOverallCreated(created);
       res.status(201).json(created);
     } catch (error) {
       console.error("Error creating overall:", error);
@@ -764,6 +770,7 @@ router.put(
       await syncOverallArticles(id, article_ids);
       await syncOverallKoverallsArticles(id, koveralls_article_ids);
 
+      await purgeOverallUpdated(existing, updated);
       res.json(updated);
     } catch (error) {
       console.error("Error updating overall:", error);
@@ -804,6 +811,7 @@ router.delete("/:id", auth, async (req, res) => {
     // Delete from database
     await pool.query("DELETE FROM overalls WHERE id = $1", [id]);
 
+    await purgeOverallDeleted(overall.rows[0]);
     res.json({ message: "Overall deleted successfully" });
   } catch (error) {
     console.error("Error deleting overall:", error);

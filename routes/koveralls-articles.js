@@ -5,6 +5,7 @@ import multer from "multer";
 import cloudinary from "../config/cloudinary.js";
 import { Readable } from "stream";
 import auth from "../middleware/auth.js";
+import { purgeNewsItemCreated, purgeNewsItemUpdated, purgeNewsItemDeleted, purgeHome } from "../utils/koverallsPurge.js";
 
 const router = express.Router();
 
@@ -100,6 +101,7 @@ router.put("/:id/feature", auth, async (req, res) => {
       [id]
     );
 
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error setting featured article:", error);
@@ -118,6 +120,7 @@ router.delete("/:id/feature", auth, async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(404).json({ error: "Article not found" });
     }
+    await purgeHome();
     res.json(result.rows[0]);
   } catch (error) {
     console.error("Error removing featured article:", error);
@@ -221,6 +224,7 @@ router.post(
         [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null, spotify_url || null, youtube_url || null, soundcloud_url || null]
       );
 
+      await purgeNewsItemCreated(result.rows[0]);
       res.status(201).json(result.rows[0]);
     } catch (error) {
       console.error("Error creating koveralls article:", error);
@@ -286,6 +290,7 @@ router.put(
         [title, author || null, content, imageUrl, thumbnailUrl, tagsArray, category || 'article', instagram_link || null, spotify_url || null, youtube_url || null, soundcloud_url || null, id]
       );
 
+      await purgeNewsItemUpdated(existingArticle.rows[0], result.rows[0]);
       res.json(result.rows[0]);
     } catch (error) {
       console.error("Error updating koveralls article:", error);
@@ -313,6 +318,7 @@ router.delete("/:id", auth, async (req, res) => {
 
     await pool.query("DELETE FROM koveralls_articles WHERE id = $1", [id]);
 
+    await purgeNewsItemDeleted(article.rows[0]);
     res.json({ message: "Article deleted successfully" });
   } catch (error) {
     console.error("Error deleting koveralls article:", error);
