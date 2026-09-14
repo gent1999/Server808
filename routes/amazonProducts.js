@@ -63,7 +63,6 @@ router.get("/", async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
     res.json({
       products: result.rows,
       count: result.rows.length
@@ -83,7 +82,6 @@ router.get("/mobile-featured", async (req, res) => {
       "SELECT * FROM amazon_products WHERE is_mobile_featured = true AND is_active = true LIMIT 1"
     );
 
-    res.set('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=1800');
     res.json({
       product: result.rows[0] || null
     });
