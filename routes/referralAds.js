@@ -2,12 +2,11 @@ import express from "express";
 import pool from "../config/db.js";
 import authMiddleware from "../middleware/auth.js";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
+import { uploadImage } from "../utils/storage.js";
 
 const router = express.Router();
 
-// ── Multer + Cloudinary ───────────────────────────────────────────────────────
+// ── Multer ─────────────────────────────────────────────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -16,15 +15,6 @@ const upload = multer({
       ? cb(null, true)
       : cb(new Error('Only image files are allowed'), false),
 });
-
-const uploadToCloudinary = (buffer, folder = 'referral_ads') =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: 'auto' },
-      (err, result) => (err ? reject(err) : resolve(result))
-    );
-    Readable.from(buffer).pipe(stream);
-  });
 
 // ── Auto-create table on boot ─────────────────────────────────────────────────
 pool.query(`
@@ -73,8 +63,7 @@ router.post('/', authMiddleware, upload.single('image'), async (req, res) => {
 
     let image_url = req.body.image_url || null;
     if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
-      image_url = result.secure_url;
+      image_url = await uploadImage(req.file.buffer, 'referral_ads');
     }
     if (!image_url) return res.status(400).json({ message: 'An image is required' });
 
@@ -101,8 +90,7 @@ router.put('/:id', authMiddleware, upload.single('image'), async (req, res) => {
 
     let image_url = req.body.image_url || ad.image_url;
     if (req.file) {
-      const result = await uploadToCloudinary(req.file.buffer);
-      image_url = result.secure_url;
+      image_url = await uploadImage(req.file.buffer, 'referral_ads');
     }
 
     const active =

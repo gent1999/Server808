@@ -2,10 +2,9 @@ import express from "express";
 import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
 import auth from "../middleware/auth.js";
 import { purgeNewsItemCreated, purgeNewsItemUpdated, purgeNewsItemDeleted, purgeHome } from "../utils/koverallsPurge.js";
+import { uploadImage, deleteImage } from "../utils/storage.js";
 
 const router = express.Router();
 
@@ -24,38 +23,6 @@ const upload = multer({
     }
   }
 });
-
-// Helper function to upload buffer to Cloudinary
-const uploadToCloudinary = (buffer, folder = 'koveralls-articles') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        resource_type: 'auto'
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-
-    const readableStream = Readable.from(buffer);
-    readableStream.pipe(uploadStream);
-  });
-};
-
-const deleteCloudinaryImage = async (url) => {
-  if (!url) return;
-  const urlParts = url.split('/');
-  const uploadIndex = urlParts.indexOf('upload');
-  const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-  const publicId = publicIdWithFolder.split('.')[0];
-  try {
-    await cloudinary.uploader.destroy(publicId);
-  } catch (error) {
-    console.error('Error deleting old image:', error);
-  }
-};
 
 // GET /api/koveralls-articles/admin/all - Get ALL native 2koveralls write-ups (admin only)
 router.get("/admin/all", auth, async (req, res) => {
@@ -203,13 +170,11 @@ router.post(
       let thumbnailUrl = null;
 
       if (req.files && req.files['image'] && req.files['image'][0]) {
-        const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
-        imageUrl = uploadResult.secure_url;
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles');
       }
 
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
-        const uploadResult = await uploadToCloudinary(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
-        thumbnailUrl = uploadResult.secure_url;
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
       }
 
       let tagsArray = null;
@@ -265,15 +230,13 @@ router.put(
       let thumbnailUrl = existingArticle.rows[0].thumbnail_url;
 
       if (req.files && req.files['image'] && req.files['image'][0]) {
-        await deleteCloudinaryImage(existingArticle.rows[0].image_url);
-        const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
-        imageUrl = uploadResult.secure_url;
+        await deleteImage(existingArticle.rows[0].image_url);
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles');
       }
 
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
-        await deleteCloudinaryImage(existingArticle.rows[0].thumbnail_url);
-        const uploadResult = await uploadToCloudinary(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
-        thumbnailUrl = uploadResult.secure_url;
+        await deleteImage(existingArticle.rows[0].thumbnail_url);
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
       }
 
       let tagsArray = null;
@@ -313,8 +276,8 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ error: "Article not found" });
     }
 
-    await deleteCloudinaryImage(article.rows[0].image_url);
-    await deleteCloudinaryImage(article.rows[0].thumbnail_url);
+    await deleteImage(article.rows[0].image_url);
+    await deleteImage(article.rows[0].thumbnail_url);
 
     await pool.query("DELETE FROM koveralls_articles WHERE id = $1", [id]);
 

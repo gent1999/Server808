@@ -2,8 +2,7 @@ import express from "express";
 import pool from "../config/db.js";
 import auth from "../middleware/auth.js";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
+import { uploadImage } from "../utils/storage.js";
 
 const router = express.Router();
 
@@ -22,25 +21,6 @@ const upload = multer({
     }
   }
 });
-
-// Helper function to upload buffer to Cloudinary
-const uploadToCloudinary = (buffer, folder = 'amazon_images') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        resource_type: 'auto'
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-
-    const readableStream = Readable.from(buffer);
-    readableStream.pipe(uploadStream);
-  });
-};
 
 // @route   GET /api/amazon-products
 // @desc    Get all active Amazon products (public), optionally filtered by page
@@ -123,14 +103,13 @@ router.post("/admin", auth, upload.single('image'), async (req, res) => {
 
     let imageUrl = null;
 
-    // Upload image to Cloudinary if file is provided
+    // Upload image if file is provided
     if (req.file) {
       try {
-        const uploadResult = await uploadToCloudinary(req.file.buffer, 'amazon_images');
-        imageUrl = uploadResult.secure_url;
-        console.log('Image uploaded to Cloudinary amazon_images folder:', imageUrl);
+        imageUrl = await uploadImage(req.file.buffer, 'amazon_images');
+        console.log('Amazon product image uploaded:', imageUrl);
       } catch (uploadError) {
-        console.error('Cloudinary upload error:', uploadError);
+        console.error('Image upload error (Cloudinary + ImageKit both failed):', uploadError);
         return res.status(500).json({ message: "Failed to upload image" });
       }
     }
@@ -181,14 +160,13 @@ router.put("/admin/:id", auth, upload.single('image'), async (req, res) => {
 
     let imageUrl = null;
 
-    // Upload new image to Cloudinary if file is provided
+    // Upload new image if file is provided
     if (req.file) {
       try {
-        const uploadResult = await uploadToCloudinary(req.file.buffer, 'amazon_images');
-        imageUrl = uploadResult.secure_url;
-        console.log('New image uploaded to Cloudinary amazon_images folder:', imageUrl);
+        imageUrl = await uploadImage(req.file.buffer, 'amazon_images');
+        console.log('New Amazon product image uploaded:', imageUrl);
       } catch (uploadError) {
-        console.error('Cloudinary upload error:', uploadError);
+        console.error('Image upload error (Cloudinary + ImageKit both failed):', uploadError);
         return res.status(500).json({ message: "Failed to upload image" });
       }
     }

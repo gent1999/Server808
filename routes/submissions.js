@@ -3,9 +3,8 @@ import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
 import Stripe from "stripe";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
 import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.js";
+import { uploadImage } from "../utils/storage.js";
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -32,16 +31,6 @@ const UPLOAD_FIELDS = upload.fields([
   { name: 'image',    maxCount: 1 },
   { name: 'document', maxCount: 1 },
 ]);
-
-// ── Cloudinary helper ──────────────────────────────────────────────────────────
-const uploadToCloudinary = (buffer, folder = 'submissions', resourceType = 'auto') =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: resourceType },
-      (err, result) => (err ? reject(err) : resolve(result))
-    );
-    Readable.from(buffer).pipe(stream);
-  });
 
 // ── Pricing ────────────────────────────────────────────────────────────────────
 const PAID_TYPES = ['regular', 'priority', 'featured', 'genius'];
@@ -166,8 +155,7 @@ router.post(
     try {
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        const r = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
-        imageUrl = r.secure_url;
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions');
       }
 
       const result = await safeInsert({
@@ -235,14 +223,12 @@ router.post(
 
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        const r = await uploadToCloudinary(req.files.image[0].buffer, 'submissions', 'image');
-        imageUrl = r.secure_url;
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions');
       }
 
       let documentUrl = null;
       if (req.files?.document?.[0]) {
-        const r = await uploadToCloudinary(req.files.document[0].buffer, 'submissions', 'raw');
-        documentUrl = r.secure_url;
+        documentUrl = await uploadImage(req.files.document[0].buffer, 'submissions');
       }
 
       const result = await safeInsert({

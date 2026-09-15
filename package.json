@@ -25,6 +25,7 @@
     "form-data": "^4.0.5",
     "genius-lyrics": "^4.4.7",
     "googleapis": "^166.0.0",
+    "imagekit": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
     "node-fetch": "^3.3.2",

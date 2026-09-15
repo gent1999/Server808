@@ -1,8 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import pool from '../config/db.js';
-import cloudinary from '../config/cloudinary.js';
-import { Readable } from 'stream';
+import { uploadImage, deleteImage } from '../utils/storage.js';
 
 const router = express.Router();
 
@@ -14,16 +13,6 @@ const upload = multer({
     else cb(new Error('Only image files are allowed!'), false);
   }
 });
-
-const uploadToCloudinary = (buffer, folder = '2k-overalls/playlists') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      { folder, resource_type: 'auto' },
-      (error, result) => error ? reject(error) : resolve(result)
-    );
-    Readable.from(buffer).pipe(uploadStream);
-  });
-};
 
 // GET all active Spotify embeds (public)
 router.get('/', async (req, res) => {
@@ -140,8 +129,7 @@ router.post('/', upload.single('cover_image'), async (req, res) => {
 
     let coverImageUrl = null;
     if (req.file) {
-      const uploadResult = await uploadToCloudinary(req.file.buffer);
-      coverImageUrl = uploadResult.secure_url;
+      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists');
     }
 
     // Get the max display_order for this site and add 1
@@ -181,14 +169,8 @@ router.put('/:id', upload.single('cover_image'), async (req, res) => {
 
     let coverImageUrl = existing.rows[0].cover_image_url;
     if (req.file) {
-      if (coverImageUrl) {
-        const urlParts = coverImageUrl.split('/');
-        const uploadIndex = urlParts.indexOf('upload');
-        const publicId = urlParts.slice(uploadIndex + 2).join('/').split('.')[0];
-        try { await cloudinary.uploader.destroy(publicId); } catch (e) { console.error('Error deleting old cover image:', e); }
-      }
-      const uploadResult = await uploadToCloudinary(req.file.buffer);
-      coverImageUrl = uploadResult.secure_url;
+      await deleteImage(coverImageUrl);
+      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists');
     }
 
     const result = await pool.query(

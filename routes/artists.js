@@ -2,9 +2,8 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import pool from '../config/db.js';
 import multer from 'multer';
-import cloudinary from '../config/cloudinary.js';
-import { Readable } from 'stream';
 import auth from '../middleware/auth.js';
+import { uploadImage } from '../utils/storage.js';
 
 const router = express.Router();
 
@@ -56,20 +55,10 @@ const upload = multer({
   { name: 'gallery_image_3', maxCount: 1 },
 ]);
 
-const uploadToCloudinary = (buffer) =>
-  new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: 'rap-blog/artists', resource_type: 'auto' },
-      (err, result) => { if (err) reject(err); else resolve(result); }
-    );
-    Readable.from(buffer).pipe(stream);
-  });
-
 async function uploadField(files, fieldName) {
   const file = files?.[fieldName]?.[0];
   if (!file) return undefined;
-  const result = await uploadToCloudinary(file.buffer);
-  return result.secure_url;
+  return uploadImage(file.buffer, 'rap-blog/artists');
 }
 
 function toSlug(name) {

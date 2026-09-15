@@ -2,13 +2,12 @@ import express from "express";
 import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
 import auth from "../middleware/auth.js";
 import { pingSitemap, requestIndexing } from "../utils/sitemapPing.js";
 import fetch from "node-fetch";
 import { getCached, setCached, bustCache } from "../utils/cache.js";
 import { purgeArticleCreated, purgeArticleUpdated, purgeArticleDeleted } from "../utils/cry808Purge.js";
+import { uploadImage, deleteImage } from "../utils/storage.js";
 
 const router = express.Router();
 
@@ -74,25 +73,6 @@ const uploadMultiple = upload.fields([
   { name: 'additional_image_3', maxCount: 1 }
 ]);
 
-// Helper function to upload buffer to Cloudinary
-const uploadToCloudinary = (buffer, folder = 'rap-blog') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        resource_type: 'auto'
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-
-    const readableStream = Readable.from(buffer);
-    readableStream.pipe(uploadStream);
-  });
-};
-
 // @route   POST /api/articles
 // @desc    Create a new article
 // @access  Private (requires admin authentication)
@@ -122,8 +102,7 @@ router.post(
       // Upload cover image to Cloudinary if file is provided (overrides URL)
       if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
-          imageUrl = uploadResult.secure_url;
+          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog');
           console.log('Cover image uploaded to Cloudinary:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
@@ -136,8 +115,7 @@ router.post(
       // Upload additional images to Cloudinary
       if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_1'][0].buffer);
-          additionalImage1 = uploadResult.secure_url;
+          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog');
           console.log('Additional image 1 uploaded:', additionalImage1);
         } catch (uploadError) {
           console.error('Additional image 1 upload error:', uploadError);
@@ -146,8 +124,7 @@ router.post(
 
       if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_2'][0].buffer);
-          additionalImage2 = uploadResult.secure_url;
+          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog');
           console.log('Additional image 2 uploaded:', additionalImage2);
         } catch (uploadError) {
           console.error('Additional image 2 upload error:', uploadError);
@@ -156,8 +133,7 @@ router.post(
 
       if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_3'][0].buffer);
-          additionalImage3 = uploadResult.secure_url;
+          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog');
           console.log('Additional image 3 uploaded:', additionalImage3);
         } catch (uploadError) {
           console.error('Additional image 3 upload error:', uploadError);
@@ -418,8 +394,7 @@ router.put(
       // Upload new cover image to Cloudinary if file is provided
       if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['image'][0].buffer);
-          imageUrl = uploadResult.secure_url;
+          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog');
           console.log('New cover image uploaded to Cloudinary:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
@@ -430,8 +405,7 @@ router.put(
       // Upload new additional images if provided
       if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_1'][0].buffer);
-          additionalImage1 = uploadResult.secure_url;
+          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog');
           console.log('New additional image 1 uploaded:', additionalImage1);
         } catch (uploadError) {
           console.error('Additional image 1 upload error:', uploadError);
@@ -440,8 +414,7 @@ router.put(
 
       if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_2'][0].buffer);
-          additionalImage2 = uploadResult.secure_url;
+          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog');
           console.log('New additional image 2 uploaded:', additionalImage2);
         } catch (uploadError) {
           console.error('Additional image 2 upload error:', uploadError);
@@ -450,8 +423,7 @@ router.put(
 
       if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
         try {
-          const uploadResult = await uploadToCloudinary(req.files['additional_image_3'][0].buffer);
-          additionalImage3 = uploadResult.secure_url;
+          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog');
           console.log('New additional image 3 uploaded:', additionalImage3);
         } catch (uploadError) {
           console.error('Additional image 3 upload error:', uploadError);
@@ -573,36 +545,11 @@ router.delete("/:id", auth, async (req, res) => {
 
     const article = getResult.rows[0];
 
-    // Helper function to delete Cloudinary image
-    const deleteCloudinaryImage = async (imageUrl, label) => {
-      if (imageUrl && imageUrl.includes('cloudinary.com')) {
-        try {
-          // Extract public_id from Cloudinary URL
-          // URL format: https://res.cloudinary.com/{cloud_name}/image/upload/v{version}/{public_id}.{format}
-          const urlParts = imageUrl.split('/');
-          const uploadIndex = urlParts.indexOf('upload');
-
-          if (uploadIndex !== -1 && uploadIndex + 2 < urlParts.length) {
-            // Get everything after 'upload/v{version}/' and remove file extension
-            const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-            const publicId = publicIdWithFolder.split('.')[0]; // Remove .jpg, .png, etc.
-
-            console.log(`Deleting ${label} from Cloudinary:`, publicId);
-            await cloudinary.uploader.destroy(publicId);
-            console.log(`${label} deleted successfully from Cloudinary`);
-          }
-        } catch (cloudinaryError) {
-          console.error(`Error deleting ${label} from Cloudinary:`, cloudinaryError);
-          // Continue with article deletion even if Cloudinary deletion fails
-        }
-      }
-    };
-
-    // Delete all images from Cloudinary
-    await deleteCloudinaryImage(article.image_url, 'Cover image');
-    await deleteCloudinaryImage(article.additional_image_1, 'Additional image 1');
-    await deleteCloudinaryImage(article.additional_image_2, 'Additional image 2');
-    await deleteCloudinaryImage(article.additional_image_3, 'Additional image 3');
+    // Delete all images (from whichever provider actually stored each one)
+    await deleteImage(article.image_url);
+    await deleteImage(article.additional_image_1);
+    await deleteImage(article.additional_image_2);
+    await deleteImage(article.additional_image_3);
 
     // Delete article from database
     const result = await pool.query(

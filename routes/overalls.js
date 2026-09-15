@@ -2,10 +2,9 @@ import express from "express";
 import { body, validationResult } from "express-validator";
 import pool from "../config/db.js";
 import multer from "multer";
-import cloudinary from "../config/cloudinary.js";
-import { Readable } from "stream";
 import auth from "../middleware/auth.js";
 import { purgeOverallCreated, purgeOverallUpdated, purgeOverallDeleted, purgeHome } from "../utils/koverallsPurge.js";
+import { uploadImage, deleteImage } from "../utils/storage.js";
 
 const router = express.Router();
 
@@ -24,25 +23,6 @@ const upload = multer({
     }
   }
 });
-
-// Helper function to upload buffer to Cloudinary
-const uploadToCloudinary = (buffer, folder = '2k-overalls') => {
-  return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: folder,
-        resource_type: 'auto'
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-
-    const readableStream = Readable.from(buffer);
-    readableStream.pipe(uploadStream);
-  });
-};
 
 // Helper function to generate slug from title
 const generateSlug = (title) => {
@@ -598,9 +578,7 @@ router.post(
         return res.status(400).json({ error: "Image is required" });
       }
 
-      // Upload image to Cloudinary
-      const uploadResult = await uploadToCloudinary(req.file.buffer);
-      const imageUrl = uploadResult.secure_url;
+      const imageUrl = await uploadImage(req.file.buffer, '2k-overalls');
 
       // Generate slug from title
       let slug = generateSlug(title);
@@ -696,24 +674,10 @@ router.put(
 
       let imageUrl = existing.image_url;
 
-      // If new image was uploaded, upload to Cloudinary and delete old one
+      // If new image was uploaded, delete the old one and upload the new one
       if (req.file) {
-        // Delete old image from Cloudinary
-        const oldImageUrl = existingOverall.rows[0].image_url;
-        const urlParts = oldImageUrl.split('/');
-        const uploadIndex = urlParts.indexOf('upload');
-        const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-        const publicId = publicIdWithFolder.split('.')[0];
-
-        try {
-          await cloudinary.uploader.destroy(publicId);
-        } catch (error) {
-          console.error('Error deleting old image from Cloudinary:', error);
-        }
-
-        // Upload new image
-        const uploadResult = await uploadToCloudinary(req.file.buffer);
-        imageUrl = uploadResult.secure_url;
+        await deleteImage(existingOverall.rows[0].image_url);
+        imageUrl = await uploadImage(req.file.buffer, '2k-overalls');
       }
 
       // Generate new slug if title changed
@@ -784,7 +748,7 @@ router.delete("/:id", auth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get overall to delete image from Cloudinary
+    // Get overall to delete its image
     const overall = await pool.query(
       "SELECT * FROM overalls WHERE id = $1",
       [id]
@@ -794,19 +758,7 @@ router.delete("/:id", auth, async (req, res) => {
       return res.status(404).json({ error: "Overall not found" });
     }
 
-    // Delete image from Cloudinary
-    const imageUrl = overall.rows[0].image_url;
-    const urlParts = imageUrl.split('/');
-    const uploadIndex = urlParts.indexOf('upload');
-    const publicIdWithFolder = urlParts.slice(uploadIndex + 2).join('/');
-    const publicId = publicIdWithFolder.split('.')[0];
-
-    try {
-      await cloudinary.uploader.destroy(publicId);
-      console.log('Image deleted from Cloudinary');
-    } catch (error) {
-      console.error('Error deleting image from Cloudinary:', error);
-    }
+    await deleteImage(overall.rows[0].image_url);
 
     // Delete from database
     await pool.query("DELETE FROM overalls WHERE id = $1", [id]);
