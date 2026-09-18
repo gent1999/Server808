@@ -5,9 +5,16 @@ import Stripe from "stripe";
 import multer from "multer";
 import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.js";
 import { uploadImage } from "../utils/storage.js";
+import { createOrder as createPaypalOrder, captureOrder as capturePaypalOrder } from "../utils/paypal.js";
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+
+// "Guaranteed Article" is PayPal-only and always exactly this price -- never
+// read from the client, per the security requirement that the frontend can
+// never submit its own amount.
+const GUARANTEED_ARTICLE_PRICE_USD = 10.00;
+const GUARANTEED_ARTICLE_PRICE_CENTS = 1000;
 
 // ── Multer ─────────────────────────────────────────────────────────────────────
 const storage = multer.memoryStorage();
@@ -51,6 +58,7 @@ async function safeInsert(fields) {
     image_url, document_url,
     genius_song_url, genius_lyrics,
     submission_type, payment_amount, payment_id, payment_status,
+    payment_provider, paypal_order_id, paypal_capture_id, paid_at,
   } = fields;
 
   // ── Attempt 1: full new-schema INSERT ────────────────────────────────────────
@@ -61,8 +69,9 @@ async function safeInsert(fields) {
           youtube_url, spotify_url, soundcloud_url,
           apple_music_url, instagram_url, genre,
           image_url, document_url, genius_song_url, genius_lyrics,
-          submission_type, payment_amount, payment_id, payment_status, submission_status)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending')
+          submission_type, payment_amount, payment_id, payment_status, submission_status,
+          payment_provider, paypal_order_id, paypal_capture_id, paid_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,'pending',$19,$20,$21,$22)
        RETURNING id, artist_name, email, title, submission_type, created_at`,
       [
         artist_name, email, title||null, content||null,
@@ -70,6 +79,7 @@ async function safeInsert(fields) {
         apple_music_url||null, instagram_url||null, genre||null,
         image_url||null, document_url||null, genius_song_url||null, genius_lyrics||null,
         submission_type, payment_amount, payment_id||null, payment_status,
+        payment_provider||null, paypal_order_id||null, paypal_capture_id||null, paid_at||null,
       ]
     );
   } catch (err) {
@@ -165,7 +175,7 @@ router.post(
         image_url: imageUrl, document_url: null,
         genius_song_url: null, genius_lyrics: null,
         submission_type: 'free', payment_amount: 0,
-        payment_id: null, payment_status: 'free',
+        payment_id: null, payment_status: 'free', payment_provider: null,
       });
 
       sendOwnerNotification({
@@ -238,7 +248,7 @@ router.post(
         image_url: imageUrl, document_url: documentUrl,
         genius_song_url: genius_song_url||null, genius_lyrics: genius_lyrics||null,
         submission_type, payment_amount: paymentIntent.amount,
-        payment_id, payment_status: 'completed',
+        payment_id, payment_status: 'completed', payment_provider: 'stripe',
       });
 
       sendOwnerNotification({
@@ -262,6 +272,133 @@ router.post(
     } catch (error) {
       console.error('Error saving paid submission:', error.message, error.code);
       res.status(500).json({ message: "Failed to save submission: " + error.message });
+    }
+  }
+);
+
+// ── @route POST /api/submissions/paypal/create-order ──────────────────────────
+// Creates a PayPal order for exactly $10.00 USD. The amount is never read
+// from the client -- GUARANTEED_ARTICLE_PRICE_USD is the only source of truth.
+router.post(
+  "/paypal/create-order",
+  [
+    body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("content").trim().notEmpty().withMessage("Content/description is required"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+      const { orderId } = await createPaypalOrder(GUARANTEED_ARTICLE_PRICE_USD, 'USD');
+      res.json({ orderId });
+    } catch (error) {
+      console.error('Error creating PayPal order:', error.message);
+      res.status(500).json({ message: "Failed to create PayPal order" });
+    }
+  }
+);
+
+// ── @route POST /api/submissions/paypal/capture-order ─────────────────────────
+// Verifies/captures the order directly with PayPal server-to-server and only
+// then saves the submission as paid. Idempotent: a second call with the same
+// paypal_order_id (duplicate callback, page refresh after success) returns
+// the existing submission instead of capturing or inserting again.
+router.post(
+  "/paypal/capture-order",
+  UPLOAD_FIELDS,
+  [
+    body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("title").trim().notEmpty().withMessage("Title is required"),
+    body("paypal_order_id").trim().notEmpty().withMessage("PayPal order ID is required"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const {
+      artist_name, email, title, content,
+      youtube_url, spotify_url, soundcloud_url,
+      apple_music_url, instagram_url, genre,
+      paypal_order_id,
+    } = req.body;
+
+    try {
+      // Idempotency check first -- never re-capture or re-insert for an
+      // order we've already processed.
+      const existing = await pool.query(
+        'SELECT id, artist_name, email, title, submission_type, created_at FROM music_submissions WHERE paypal_order_id = $1',
+        [paypal_order_id]
+      );
+      if (existing.rows.length > 0) {
+        return res.status(200).json({
+          message: "Submission already recorded for this payment.",
+          submission: existing.rows[0],
+        });
+      }
+
+      const capture = await capturePaypalOrder(paypal_order_id);
+      if (capture.amount !== GUARANTEED_ARTICLE_PRICE_USD.toFixed(2) || capture.currency !== 'USD') {
+        // Should be unreachable since the order was created server-side for
+        // this exact amount, but never trust it without checking.
+        console.error('[PAYPAL RECONCILIATION NEEDED] Captured amount mismatch', {
+          paypal_order_id, captureId: capture.captureId, amount: capture.amount, currency: capture.currency,
+        });
+        return res.status(400).json({ message: "Payment amount mismatch" });
+      }
+
+      let imageUrl = null;
+      if (req.files?.image?.[0]) {
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions');
+      }
+
+      try {
+        const result = await safeInsert({
+          artist_name, email, title, content: content || null,
+          youtube_url, spotify_url, soundcloud_url,
+          apple_music_url, instagram_url, genre,
+          image_url: imageUrl, document_url: null,
+          genius_song_url: null, genius_lyrics: null,
+          submission_type: 'guaranteed_article', payment_amount: GUARANTEED_ARTICLE_PRICE_CENTS,
+          payment_id: capture.captureId, payment_status: 'completed', payment_provider: 'paypal',
+          paypal_order_id, paypal_capture_id: capture.captureId, paid_at: new Date(),
+        });
+
+        sendOwnerNotification({
+          artist_name, email, title, submission_type: 'guaranteed_article',
+          payment_amount: GUARANTEED_ARTICLE_PRICE_CENTS, content,
+          youtube_url, spotify_url, soundcloud_url,
+          apple_music_url, instagram_url, genre, image_url: imageUrl,
+        }).catch(err => console.error('Owner email error:', err));
+
+        sendCustomerConfirmation({
+          artist_name, email, submission_type: 'guaranteed_article',
+          payment_amount: GUARANTEED_ARTICLE_PRICE_CENTS,
+        }).catch(err => console.error('Customer email error:', err));
+
+        res.status(201).json({
+          message: "Payment successful. Your guaranteed Cry808 article submission has been received.",
+          orderId: paypal_order_id,
+          submission: result.rows[0],
+        });
+      } catch (dbError) {
+        // Money has already been captured -- never let a DB failure lose
+        // that fact. Logged clearly for manual reconciliation.
+        console.error('[PAYPAL RECONCILIATION NEEDED] Capture succeeded but DB save failed', {
+          paypal_order_id, captureId: capture.captureId,
+          amount: capture.amount, currency: capture.currency,
+          artist_name, email, error: dbError.message,
+        });
+        res.status(502).json({
+          message: "Payment succeeded but we couldn't save your submission. Please contact support with this order ID.",
+          orderId: paypal_order_id,
+        });
+      }
+    } catch (error) {
+      console.error('Error capturing PayPal order:', error.message);
+      res.status(500).json({ message: "Payment could not be verified. Please try again or contact support." });
     }
   }
 );
