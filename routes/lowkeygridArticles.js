@@ -190,12 +190,20 @@ router.post(
 
       // Upload original image if provided
       if (req.files && req.files['image'] && req.files['image'][0]) {
-        imageUrl = await uploadImage(req.files['image'][0].buffer, 'lowkeygrid');
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'lowkeygrid', {
+          site: '2koveralls',
+          filename: req.files['image'][0].originalname,
+          contentType: req.files['image'][0].mimetype,
+        });
       }
 
       // Upload thumbnail (cropped) if provided
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
-        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails');
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails', {
+          site: '2koveralls',
+          filename: req.files['thumbnail'][0].originalname,
+          contentType: req.files['thumbnail'][0].mimetype,
+        });
       }
 
       // Parse tags if provided as string
@@ -257,13 +265,21 @@ router.put(
       // If new original image uploaded, replace old one
       if (req.files && req.files['image'] && req.files['image'][0]) {
         await deleteImage(existingArticle.rows[0].image_url);
-        imageUrl = await uploadImage(req.files['image'][0].buffer, 'lowkeygrid');
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'lowkeygrid', {
+          site: '2koveralls',
+          filename: req.files['image'][0].originalname,
+          contentType: req.files['image'][0].mimetype,
+        });
       }
 
       // If new thumbnail uploaded, replace old one
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
         await deleteImage(existingArticle.rows[0].thumbnail_url);
-        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails');
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'lowkeygrid/thumbnails', {
+          site: '2koveralls',
+          filename: req.files['thumbnail'][0].originalname,
+          contentType: req.files['thumbnail'][0].mimetype,
+        });
       }
 
       // Parse tags

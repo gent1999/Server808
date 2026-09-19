@@ -170,11 +170,19 @@ router.post(
       let thumbnailUrl = null;
 
       if (req.files && req.files['image'] && req.files['image'][0]) {
-        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles');
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles', {
+          site: '2koveralls',
+          filename: req.files['image'][0].originalname,
+          contentType: req.files['image'][0].mimetype,
+        });
       }
 
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
-        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails', {
+          site: '2koveralls',
+          filename: req.files['thumbnail'][0].originalname,
+          contentType: req.files['thumbnail'][0].mimetype,
+        });
       }
 
       let tagsArray = null;
@@ -231,12 +239,20 @@ router.put(
 
       if (req.files && req.files['image'] && req.files['image'][0]) {
         await deleteImage(existingArticle.rows[0].image_url);
-        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles');
+        imageUrl = await uploadImage(req.files['image'][0].buffer, 'koveralls-articles', {
+          site: '2koveralls',
+          filename: req.files['image'][0].originalname,
+          contentType: req.files['image'][0].mimetype,
+        });
       }
 
       if (req.files && req.files['thumbnail'] && req.files['thumbnail'][0]) {
         await deleteImage(existingArticle.rows[0].thumbnail_url);
-        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails');
+        thumbnailUrl = await uploadImage(req.files['thumbnail'][0].buffer, 'koveralls-articles/thumbnails', {
+          site: '2koveralls',
+          filename: req.files['thumbnail'][0].originalname,
+          contentType: req.files['thumbnail'][0].mimetype,
+        });
       }
 
       let tagsArray = null;

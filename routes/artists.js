@@ -58,7 +58,11 @@ const upload = multer({
 async function uploadField(files, fieldName) {
   const file = files?.[fieldName]?.[0];
   if (!file) return undefined;
-  return uploadImage(file.buffer, 'rap-blog/artists');
+  return uploadImage(file.buffer, 'rap-blog/artists', {
+    site: 'cry808',
+    filename: file.originalname,
+    contentType: file.mimetype,
+  });
 }
 
 function toSlug(name) {

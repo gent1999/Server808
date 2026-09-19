@@ -155,7 +155,11 @@ router.post(
     try {
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions');
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions', {
+          site: 'cry808',
+          filename: req.files.image[0].originalname,
+          contentType: req.files.image[0].mimetype,
+        });
       }
 
       const result = await safeInsert({
@@ -223,12 +227,20 @@ router.post(
 
       let imageUrl = null;
       if (req.files?.image?.[0]) {
-        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions');
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions', {
+          site: 'cry808',
+          filename: req.files.image[0].originalname,
+          contentType: req.files.image[0].mimetype,
+        });
       }
 
       let documentUrl = null;
       if (req.files?.document?.[0]) {
-        documentUrl = await uploadImage(req.files.document[0].buffer, 'submissions');
+        documentUrl = await uploadImage(req.files.document[0].buffer, 'submissions', {
+          site: 'cry808',
+          filename: req.files.document[0].originalname,
+          contentType: req.files.document[0].mimetype,
+        });
       }
 
       const result = await safeInsert({

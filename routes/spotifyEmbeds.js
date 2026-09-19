@@ -117,6 +117,11 @@ router.post('/', upload.single('cover_image'), async (req, res) => {
   try {
     const { spotify_url, page_type = 'home', site = 'cry808', title: titleInput, description, is_featured } = req.body;
 
+    // spotify_embeds.site uses the legacy 'lowkeygrid' value for what's now
+    // 2koveralls (see the LowkeyGrid -> 2koveralls rename); map it to our
+    // Cloud808 site key without touching the stored DB value itself.
+    const cloud808Site = site === 'lowkeygrid' ? '2koveralls' : site === 'cry808' ? 'cry808' : undefined;
+
     if (!spotify_url) {
       return res.status(400).json({ message: 'Spotify URL is required' });
     }
@@ -129,7 +134,11 @@ router.post('/', upload.single('cover_image'), async (req, res) => {
 
     let coverImageUrl = null;
     if (req.file) {
-      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists');
+      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists', {
+        site: cloud808Site,
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
     }
 
     // Get the max display_order for this site and add 1
@@ -167,10 +176,17 @@ router.put('/:id', upload.single('cover_image'), async (req, res) => {
       return res.status(404).json({ message: 'Spotify embed not found' });
     }
 
+    const existingSite = existing.rows[0].site;
+    const cloud808Site = existingSite === 'lowkeygrid' ? '2koveralls' : existingSite === 'cry808' ? 'cry808' : undefined;
+
     let coverImageUrl = existing.rows[0].cover_image_url;
     if (req.file) {
       await deleteImage(coverImageUrl);
-      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists');
+      coverImageUrl = await uploadImage(req.file.buffer, '2k-overalls/playlists', {
+        site: cloud808Site,
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
     }
 
     const result = await pool.query(

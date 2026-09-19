@@ -102,8 +102,12 @@ router.post(
       // Upload cover image to Cloudinary if file is provided (overrides URL)
       if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog');
-          console.log('Cover image uploaded to Cloudinary:', imageUrl);
+          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['image'][0].originalname,
+            contentType: req.files['image'][0].mimetype,
+          });
+          console.log('Cover image uploaded:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
           return res.status(500).json({ message: "Failed to upload cover image" });
@@ -115,7 +119,11 @@ router.post(
       // Upload additional images to Cloudinary
       if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
         try {
-          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog');
+          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_1'][0].originalname,
+            contentType: req.files['additional_image_1'][0].mimetype,
+          });
           console.log('Additional image 1 uploaded:', additionalImage1);
         } catch (uploadError) {
           console.error('Additional image 1 upload error:', uploadError);
@@ -124,7 +132,11 @@ router.post(
 
       if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
         try {
-          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog');
+          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_2'][0].originalname,
+            contentType: req.files['additional_image_2'][0].mimetype,
+          });
           console.log('Additional image 2 uploaded:', additionalImage2);
         } catch (uploadError) {
           console.error('Additional image 2 upload error:', uploadError);
@@ -133,7 +145,11 @@ router.post(
 
       if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
         try {
-          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog');
+          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_3'][0].originalname,
+            contentType: req.files['additional_image_3'][0].mimetype,
+          });
           console.log('Additional image 3 uploaded:', additionalImage3);
         } catch (uploadError) {
           console.error('Additional image 3 upload error:', uploadError);
@@ -394,8 +410,12 @@ router.put(
       // Upload new cover image to Cloudinary if file is provided
       if (req.files && req.files['image'] && req.files['image'][0]) {
         try {
-          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog');
-          console.log('New cover image uploaded to Cloudinary:', imageUrl);
+          imageUrl = await uploadImage(req.files['image'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['image'][0].originalname,
+            contentType: req.files['image'][0].mimetype,
+          });
+          console.log('New cover image uploaded:', imageUrl);
         } catch (uploadError) {
           console.error('Cloudinary upload error:', uploadError);
           return res.status(500).json({ message: "Failed to upload cover image" });
@@ -405,7 +425,11 @@ router.put(
       // Upload new additional images if provided
       if (req.files && req.files['additional_image_1'] && req.files['additional_image_1'][0]) {
         try {
-          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog');
+          additionalImage1 = await uploadImage(req.files['additional_image_1'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_1'][0].originalname,
+            contentType: req.files['additional_image_1'][0].mimetype,
+          });
           console.log('New additional image 1 uploaded:', additionalImage1);
         } catch (uploadError) {
           console.error('Additional image 1 upload error:', uploadError);
@@ -414,7 +438,11 @@ router.put(
 
       if (req.files && req.files['additional_image_2'] && req.files['additional_image_2'][0]) {
         try {
-          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog');
+          additionalImage2 = await uploadImage(req.files['additional_image_2'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_2'][0].originalname,
+            contentType: req.files['additional_image_2'][0].mimetype,
+          });
           console.log('New additional image 2 uploaded:', additionalImage2);
         } catch (uploadError) {
           console.error('Additional image 2 upload error:', uploadError);
@@ -423,7 +451,11 @@ router.put(
 
       if (req.files && req.files['additional_image_3'] && req.files['additional_image_3'][0]) {
         try {
-          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog');
+          additionalImage3 = await uploadImage(req.files['additional_image_3'][0].buffer, 'rap-blog', {
+            site: 'cry808',
+            filename: req.files['additional_image_3'][0].originalname,
+            contentType: req.files['additional_image_3'][0].mimetype,
+          });
           console.log('New additional image 3 uploaded:', additionalImage3);
         } catch (uploadError) {
           console.error('Additional image 3 upload error:', uploadError);

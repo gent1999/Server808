@@ -63,7 +63,11 @@ router.post('/', authMiddleware, upload.single('image'), async (req, res) => {
 
     let image_url = req.body.image_url || null;
     if (req.file) {
-      image_url = await uploadImage(req.file.buffer, 'referral_ads');
+      image_url = await uploadImage(req.file.buffer, 'referral_ads', {
+        site: 'cry808',
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
     }
     if (!image_url) return res.status(400).json({ message: 'An image is required' });
 
@@ -90,7 +94,11 @@ router.put('/:id', authMiddleware, upload.single('image'), async (req, res) => {
 
     let image_url = req.body.image_url || ad.image_url;
     if (req.file) {
-      image_url = await uploadImage(req.file.buffer, 'referral_ads');
+      image_url = await uploadImage(req.file.buffer, 'referral_ads', {
+        site: 'cry808',
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
     }
 
     const active =

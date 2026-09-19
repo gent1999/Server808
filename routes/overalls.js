@@ -578,7 +578,11 @@ router.post(
         return res.status(400).json({ error: "Image is required" });
       }
 
-      const imageUrl = await uploadImage(req.file.buffer, '2k-overalls');
+      const imageUrl = await uploadImage(req.file.buffer, '2k-overalls', {
+        site: '2koveralls',
+        filename: req.file.originalname,
+        contentType: req.file.mimetype,
+      });
 
       // Generate slug from title
       let slug = generateSlug(title);
@@ -677,7 +681,11 @@ router.put(
       // If new image was uploaded, delete the old one and upload the new one
       if (req.file) {
         await deleteImage(existingOverall.rows[0].image_url);
-        imageUrl = await uploadImage(req.file.buffer, '2k-overalls');
+        imageUrl = await uploadImage(req.file.buffer, '2k-overalls', {
+          site: '2koveralls',
+          filename: req.file.originalname,
+          contentType: req.file.mimetype,
+        });
       }
 
       // Generate new slug if title changed
