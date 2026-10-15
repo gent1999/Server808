@@ -41,35 +41,26 @@ router.put("/", auth, async (req, res) => {
       return res.status(400).json({ message: "Invalid settings format" });
     }
 
-    // Update each setting in a transaction
-    const client = await pool.connect();
+    // Single bulk upsert instead of one round-trip per key — with ~27 settings
+    // keys, 27 sequential awaited queries on a Neon connection that may need
+    // to wake from autosuspend was enough to blow past the request timeout.
+    const keys = Object.keys(settings);
+    const values = Object.values(settings).map(v => String(v));
 
-    try {
-      await client.query('BEGIN');
+    await pool.query(
+      `INSERT INTO settings (key, value)
+       SELECT * FROM UNNEST($1::text[], $2::text[])
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP`,
+      [keys, values]
+    );
 
-      for (const [key, value] of Object.entries(settings)) {
-        await client.query(
-          `INSERT INTO settings (key, value) VALUES ($2, $1)
-           ON CONFLICT (key) DO UPDATE SET value = $1, updated_at = CURRENT_TIMESTAMP`,
-          [value, key]
-        );
-      }
+    // Bust public settings cache so next page load gets fresh data
+    bustCache(SETTINGS_PUBLIC_KEY);
 
-      await client.query('COMMIT');
-
-      // Bust public settings cache so next page load gets fresh data
-      bustCache(SETTINGS_PUBLIC_KEY);
-
-      res.json({
-        message: "Settings updated successfully",
-        settings
-      });
-    } catch (error) {
-      await client.query('ROLLBACK');
-      throw error;
-    } finally {
-      client.release();
-    }
+    res.json({
+      message: "Settings updated successfully",
+      settings
+    });
   } catch (error) {
     console.error("Error updating settings:", error);
     res.status(500).json({ message: "Server error" });
