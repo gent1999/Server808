@@ -31,6 +31,7 @@ pool.query(`
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS soundcloud_url TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS youtube_url TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS genius_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS instagram_url TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS apple_music_url TEXT`),
 ])).then(() => pool.query(`
   CREATE TABLE IF NOT EXISTS artist_articles (
@@ -139,7 +140,7 @@ router.post('/', auth, upload, [
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
-  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url } = req.body;
+  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, instagram_url, apple_music_url } = req.body;
   const slug = toSlug(name);
 
   try {
@@ -152,11 +153,11 @@ router.post('/', auth, upload, [
 
     const { rows: [artist] } = await pool.query(
       `INSERT INTO artists (name, slug, bio, bio2, profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3,
-         spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
+         spotify_url, soundcloud_url, youtube_url, genius_url, instagram_url, apple_music_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [name, slug, bio || null, bio2 || null,
        profile_image_url || null, gallery_image_1 || null, gallery_image_2 || null, gallery_image_3 || null,
-       spotify_url || null, soundcloud_url || null, youtube_url || null, genius_url || null, apple_music_url || null]
+       spotify_url || null, soundcloud_url || null, youtube_url || null, genius_url || null, instagram_url || null, apple_music_url || null]
     );
 
     // Queue indexing job — 808-engine polls for these every 60s
@@ -179,7 +180,7 @@ router.post('/', auth, upload, [
 
 // PUT /api/artists/:id
 router.put('/:id', auth, upload, async (req, res) => {
-  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, apple_music_url } = req.body;
+  const { name, bio, bio2, spotify_url, soundcloud_url, youtube_url, genius_url, instagram_url, apple_music_url } = req.body;
   try {
     const [profile_image_url, gallery_image_1, gallery_image_2, gallery_image_3] = await Promise.all([
       uploadField(req.files, 'profile_image'),
@@ -203,6 +204,7 @@ router.put('/:id', auth, upload, async (req, res) => {
     if (soundcloud_url !== undefined)  { setClauses.push(`soundcloud_url=$${i++}`); values.push(soundcloud_url || null); }
     if (youtube_url !== undefined)     { setClauses.push(`youtube_url=$${i++}`); values.push(youtube_url || null); }
     if (genius_url !== undefined)      { setClauses.push(`genius_url=$${i++}`); values.push(genius_url || null); }
+    if (instagram_url !== undefined)   { setClauses.push(`instagram_url=$${i++}`); values.push(instagram_url || null); }
     if (apple_music_url !== undefined) { setClauses.push(`apple_music_url=$${i++}`); values.push(apple_music_url || null); }
     setClauses.push('updated_at=NOW()');
     values.push(req.params.id);
