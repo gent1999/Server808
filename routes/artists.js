@@ -33,6 +33,7 @@ pool.query(`
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS genius_url TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS instagram_url TEXT`),
   pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS apple_music_url TEXT`),
+  pool.query(`ALTER TABLE artists ADD COLUMN IF NOT EXISTS display_order INTEGER DEFAULT 0`),
 ])).then(() => pool.query(`
   CREATE TABLE IF NOT EXISTS artist_articles (
     artist_id  INTEGER NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
@@ -76,8 +77,25 @@ function toSlug(name) {
 // GET /api/artists
 router.get('/', async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM artists ORDER BY name ASC');
+    const { rows } = await pool.query('SELECT * FROM artists ORDER BY display_order ASC, name ASC');
     res.json({ artists: rows });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// PUT /api/artists/reorder — bulk-set display_order from an ordered array of ids.
+// Registered before PUT /:id so "reorder" doesn't get swallowed as an :id param.
+router.put('/reorder', auth, async (req, res) => {
+  const { order } = req.body;
+  if (!Array.isArray(order) || order.length === 0) {
+    return res.status(400).json({ message: 'order must be a non-empty array of artist ids' });
+  }
+  try {
+    await Promise.all(
+      order.map((id, index) => pool.query('UPDATE artists SET display_order=$1 WHERE id=$2', [index, id]))
+    );
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
