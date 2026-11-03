@@ -29,6 +29,7 @@ import artistsRoutes from "./routes/artists.js";
 import searchRoutes from "./routes/search.js";
 import authMiddleware from "./middleware/auth.js";
 import handleStripeWebhook from "./routes/stripeWebhook.js";
+import { ALLOWED_ORIGINS } from "./config/siteOrigins.js";
 
 dotenv.config();
 
@@ -38,18 +39,8 @@ const PORT = process.env.PORT || 5000;
 // ── CORS ─────────────────────────────────────────────────────────────────────
 // Only our own frontends are allowed to call this API from a browser.
 // Direct server-to-server calls (808-engine, curl) are unaffected by CORS.
-const ALLOWED_ORIGINS = [
-  'https://cry808.com',
-  'https://www.cry808.com',
-  'https://lowkeygrid.com',
-  'https://www.lowkeygrid.com',
-  'https://2koveralls.com',
-  'https://www.2koveralls.com',
-  // Allow localhost in dev
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:4173',
-];
+// ALLOWED_ORIGINS lives in config/siteOrigins.js, shared with the Stripe
+// Checkout return-URL logic in routes/submissions.js.
 
 // ── Manual CORS middleware ────────────────────────────────────────────────────
 // The cors npm package has subtle incompatibilities with Express 5's response

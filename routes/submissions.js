@@ -5,6 +5,7 @@ import Stripe from "stripe";
 import multer from "multer";
 import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.js";
 import { uploadImage } from "../utils/storage.js";
+import { SITE_RETURN_PATHS } from "../config/siteOrigins.js";
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -159,6 +160,14 @@ router.post(
       submission_type,
     } = req.body;
 
+    // The Checkout return URL is built from the caller's own Origin header,
+    // validated against a known allowlist -- never from client-submitted
+    // data, which would otherwise be an open-redirect vector.
+    const returnPath = SITE_RETURN_PATHS[req.headers.origin];
+    if (!returnPath) {
+      return res.status(403).json({ message: "Checkout is not available from this site" });
+    }
+
     try {
       let imageUrl = null;
       if (req.files?.image?.[0]) {
@@ -180,13 +189,14 @@ router.post(
       });
 
       const submissionId = inserted.rows[0].id;
+      const origin = req.headers.origin;
 
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
         line_items: [{ price: process.env.STRIPE_PRICE_ID_PRIORITY, quantity: 1 }],
         customer_email: email,
-        success_url: `${process.env.FRONTEND_URL}/submit-music?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${process.env.FRONTEND_URL}/submit-music?checkout=canceled`,
+        success_url: `${origin}${returnPath}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}${returnPath}?checkout=canceled`,
         metadata: { submission_id: String(submissionId), submission_type },
       });
 
