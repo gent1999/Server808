@@ -38,8 +38,12 @@ const PAID_TYPES = ['regular', 'priority', 'featured', 'genius'];
 
 function getAmount(type) {
   if (type === 'featured') return 700;  // legacy $7
-  if (type === 'genius')   return 1000; // $10
-  return 500;                           // regular / priority → $5
+  return 500;                           // regular / priority / genius → $5
+}
+
+function getPriceId(type) {
+  if (type === 'genius') return process.env.STRIPE_PRICE_ID_GENIUS;
+  return process.env.STRIPE_PRICE_ID_PRIORITY;
 }
 
 // ── Safe INSERT: tries new schema, falls back to old schema on any constraint error ──
@@ -148,6 +152,8 @@ router.post(
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("content").trim().notEmpty().withMessage("Description is required"),
     body("submission_type").isIn(PAID_TYPES).withMessage("Invalid submission type"),
+    body("genius_song_url").if(body("submission_type").equals("genius")).trim().notEmpty().withMessage("Song/artist URL is required"),
+    body("genius_lyrics").if(body("submission_type").equals("genius")).trim().isLength({ min: 100 }).withMessage("Lyrics must be at least 100 characters"),
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -157,15 +163,25 @@ router.post(
       artist_name, email, title, content,
       youtube_url, spotify_url, soundcloud_url,
       apple_music_url, instagram_url, genre,
-      submission_type,
+      submission_type, genius_song_url, genius_lyrics,
+      return_path,
     } = req.body;
 
     // The Checkout return URL is built from the caller's own Origin header,
     // validated against a known allowlist -- never from client-submitted
-    // data, which would otherwise be an open-redirect vector.
-    const returnPath = SITE_RETURN_PATHS[req.headers.origin];
-    if (!returnPath) {
+    // data, which would otherwise be an open-redirect vector. A caller with
+    // more than one paid flow on the same origin can request a specific
+    // allowed path via `return_path`; anything else falls back to the
+    // origin's default (first) path.
+    const allowedPaths = SITE_RETURN_PATHS[req.headers.origin];
+    if (!allowedPaths) {
       return res.status(403).json({ message: "Checkout is not available from this site" });
+    }
+    const returnPath = allowedPaths.includes(return_path) ? return_path : allowedPaths[0];
+
+    const priceId = getPriceId(submission_type);
+    if (!priceId) {
+      return res.status(503).json({ message: "Checkout is not configured for this submission type" });
     }
 
     try {
@@ -183,7 +199,7 @@ router.post(
         youtube_url, spotify_url, soundcloud_url,
         apple_music_url, instagram_url, genre,
         image_url: imageUrl, document_url: null,
-        genius_song_url: null, genius_lyrics: null,
+        genius_song_url: genius_song_url || null, genius_lyrics: genius_lyrics || null,
         submission_type, payment_amount: getAmount(submission_type),
         payment_id: null, payment_status: 'pending',
       });
@@ -193,7 +209,7 @@ router.post(
 
       const session = await stripe.checkout.sessions.create({
         mode: 'payment',
-        line_items: [{ price: process.env.STRIPE_PRICE_ID_PRIORITY, quantity: 1 }],
+        line_items: [{ price: priceId, quantity: 1 }],
         customer_email: email,
         success_url: `${origin}${returnPath}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}${returnPath}?checkout=canceled`,
