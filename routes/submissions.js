@@ -132,6 +132,74 @@ router.post(
   }
 );
 
+// ── @route POST /api/submissions/create-checkout-session ───────────────────────
+// Stripe Checkout (hosted page) flow. The submission is saved as "pending"
+// immediately -- before the browser ever leaves the site -- so the artist's
+// info and cover art are never lost even if they abandon checkout. Only the
+// Stripe webhook (routes/stripeWebhook.js) is allowed to flip it to
+// "completed"; this endpoint never trusts the client's return redirect.
+router.post(
+  "/create-checkout-session",
+  UPLOAD_FIELDS,
+  [
+    body("artist_name").trim().notEmpty().withMessage("Artist name is required"),
+    body("email").isEmail().withMessage("Valid email is required"),
+    body("title").trim().notEmpty().withMessage("Title is required"),
+    body("content").trim().notEmpty().withMessage("Description is required"),
+    body("submission_type").isIn(PAID_TYPES).withMessage("Invalid submission type"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    const {
+      artist_name, email, title, content,
+      youtube_url, spotify_url, soundcloud_url,
+      apple_music_url, instagram_url, genre,
+      submission_type,
+    } = req.body;
+
+    try {
+      let imageUrl = null;
+      if (req.files?.image?.[0]) {
+        imageUrl = await uploadImage(req.files.image[0].buffer, 'submissions', {
+          site: 'cry808',
+          filename: req.files.image[0].originalname,
+          contentType: req.files.image[0].mimetype,
+        });
+      }
+
+      const inserted = await safeInsert({
+        artist_name, email, title, content,
+        youtube_url, spotify_url, soundcloud_url,
+        apple_music_url, instagram_url, genre,
+        image_url: imageUrl, document_url: null,
+        genius_song_url: null, genius_lyrics: null,
+        submission_type, payment_amount: getAmount(submission_type),
+        payment_id: null, payment_status: 'pending',
+      });
+
+      const submissionId = inserted.rows[0].id;
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        line_items: [{ price: process.env.STRIPE_PRICE_ID_PRIORITY, quantity: 1 }],
+        customer_email: email,
+        success_url: `${process.env.FRONTEND_URL}/submit-music?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.FRONTEND_URL}/submit-music?checkout=canceled`,
+        metadata: { submission_id: String(submissionId), submission_type },
+      });
+
+      await pool.query('UPDATE music_submissions SET stripe_session_id = $1 WHERE id = $2', [session.id, submissionId]);
+
+      res.json({ url: session.url });
+    } catch (error) {
+      console.error('Error creating checkout session:', error.message);
+      res.status(500).json({ message: "Failed to start checkout" });
+    }
+  }
+);
+
 // ── @route POST /api/submissions/free-submit ──────────────────────────────────
 router.post(
   "/free-submit",

@@ -28,6 +28,7 @@ import referralAdsRoutes from "./routes/referralAds.js";
 import artistsRoutes from "./routes/artists.js";
 import searchRoutes from "./routes/search.js";
 import authMiddleware from "./middleware/auth.js";
+import handleStripeWebhook from "./routes/stripeWebhook.js";
 
 dotenv.config();
 
@@ -126,6 +127,11 @@ const geniusLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: 'Too many requests.' },
 });
+
+// Stripe webhook needs the exact raw request body for signature
+// verification, so it must be registered before the global JSON parser
+// below and is deliberately exempt from the general rate limiter.
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), handleStripeWebhook);
 
 app.use(generalLimiter);
 
