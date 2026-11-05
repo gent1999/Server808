@@ -1,16 +1,17 @@
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 
-// Lazy init so a missing key doesn't crash the server at boot.
-let _resend = null;
-const getResend = () => {
-  if (!_resend) {
-    if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not set');
-    _resend = new Resend(process.env.RESEND_API_KEY);
-  }
-  return _resend;
+// contact@pluggpress.com is hosted on Namecheap Private Email (mx1/mx2.privateemail.com).
+const createTransporter = () => {
+  return nodemailer.createTransport({
+    host: 'mail.privateemail.com',
+    port: 587,
+    secure: false, // STARTTLS
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASSWORD,
+    },
+  });
 };
-
-const fromAddress = () => process.env.SUBMISSIONS_FROM_EMAIL || process.env.OWNER_EMAIL || 'contact@pluggpress.com';
 
 /**
  * Send notification email to site owner about new submission
@@ -35,8 +36,8 @@ export async function sendOwnerNotification(submissionData) {
     const submissionTypeLabel = typeLabel(submission_type);
     const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
-    const { error } = await getResend().emails.send({
-      from: `PluggPress <${fromAddress()}>`,
+    await createTransporter().sendMail({
+      from: process.env.EMAIL_USER,
       to: process.env.OWNER_EMAIL,
       replyTo: email,
       subject: `🎵 New Music Submission - ${submissionTypeLabel} - ${artist_name}`,
@@ -161,7 +162,6 @@ export async function sendOwnerNotification(submissionData) {
       `,
     });
 
-    if (error) throw new Error(error.message);
     console.log('✅ Owner notification email sent successfully');
   } catch (error) {
     console.error('❌ Error sending owner notification email:', error.message);
@@ -179,8 +179,8 @@ export async function sendCustomerConfirmation(submissionData) {
     const submissionTypeLabel = typeLabel(submission_type);
     const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
-    const { error } = await getResend().emails.send({
-      from: `Cry808 <${fromAddress()}>`,
+    await createTransporter().sendMail({
+      from: process.env.EMAIL_USER,
       to: email,
       replyTo: process.env.OWNER_EMAIL,
       subject: `🎉 Submission Received - ${artist_name}`,
@@ -250,7 +250,6 @@ export async function sendCustomerConfirmation(submissionData) {
       `,
     });
 
-    if (error) throw new Error(error.message);
     console.log('✅ Customer confirmation email sent successfully');
   } catch (error) {
     console.error('❌ Error sending customer confirmation email:', error.message);
