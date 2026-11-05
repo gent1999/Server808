@@ -41,8 +41,14 @@ export default async function handleStripeWebhook(req, res) {
 
         const sub = rows[0];
         if (sub) {
-          sendOwnerNotification({ ...sub }).catch(err => console.error('Owner email error:', err.message));
-          sendCustomerConfirmation({ ...sub }).catch(err => console.error('Customer email error:', err.message));
+          // Must be awaited, not fire-and-forget -- on Vercel's serverless
+          // runtime the function execution can freeze the instant the
+          // response is sent, killing an in-flight Resend call before it
+          // ever reaches the network.
+          await Promise.all([
+            sendOwnerNotification({ ...sub }).catch(err => console.error('Owner email error:', err.message)),
+            sendCustomerConfirmation({ ...sub }).catch(err => console.error('Customer email error:', err.message)),
+          ]);
         }
       }
     } else if (event.type === 'checkout.session.expired') {
