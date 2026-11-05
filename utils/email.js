@@ -1,16 +1,16 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-// Create email transporter
-const createTransporter = () => {
-  // Using Gmail as example - you can use any email service
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD, // Use App Password for Gmail
-    },
-  });
+// Lazy init so a missing key doesn't crash the server at boot.
+let _resend = null;
+const getResend = () => {
+  if (!_resend) {
+    if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY is not set');
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
 };
+
+const fromAddress = () => process.env.SUBMISSIONS_FROM_EMAIL || process.env.OWNER_EMAIL || 'contact@pluggpress.com';
 
 /**
  * Send notification email to site owner about new submission
@@ -25,8 +25,6 @@ function typeLabel(type) {
 
 export async function sendOwnerNotification(submissionData) {
   try {
-    const transporter = createTransporter();
-
     const {
       artist_name, email, title, submission_type, payment_amount, content,
       youtube_url, spotify_url, soundcloud_url, apple_music_url,
@@ -37,9 +35,10 @@ export async function sendOwnerNotification(submissionData) {
     const submissionTypeLabel = typeLabel(submission_type);
     const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
-      to: process.env.OWNER_EMAIL, // Your email
+    const { error } = await getResend().emails.send({
+      from: `PluggPress <${fromAddress()}>`,
+      to: process.env.OWNER_EMAIL,
+      replyTo: email,
       subject: `🎵 New Music Submission - ${submissionTypeLabel} - ${artist_name}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -160,9 +159,9 @@ export async function sendOwnerNotification(submissionData) {
           </div>
         </div>
       `,
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (error) throw new Error(error.message);
     console.log('✅ Owner notification email sent successfully');
   } catch (error) {
     console.error('❌ Error sending owner notification email:', error.message);
@@ -175,16 +174,15 @@ export async function sendOwnerNotification(submissionData) {
  */
 export async function sendCustomerConfirmation(submissionData) {
   try {
-    const transporter = createTransporter();
-
     const { artist_name, email, submission_type, payment_amount } = submissionData;
 
     const submissionTypeLabel = typeLabel(submission_type);
     const amount = payment_amount > 0 ? `$${(payment_amount / 100).toFixed(2)}` : 'Free';
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    const { error } = await getResend().emails.send({
+      from: `Cry808 <${fromAddress()}>`,
       to: email,
+      replyTo: process.env.OWNER_EMAIL,
       subject: `🎉 Submission Received - ${artist_name}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -250,9 +248,9 @@ export async function sendCustomerConfirmation(submissionData) {
           </div>
         </div>
       `,
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
+    if (error) throw new Error(error.message);
     console.log('✅ Customer confirmation email sent successfully');
   } catch (error) {
     console.error('❌ Error sending customer confirmation email:', error.message);
