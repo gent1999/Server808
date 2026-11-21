@@ -6,6 +6,7 @@ import multer from "multer";
 import { sendOwnerNotification, sendCustomerConfirmation } from "../utils/email.js";
 import { uploadImage } from "../utils/storage.js";
 import { SITE_RETURN_PATHS } from "../config/siteOrigins.js";
+import { STRIPE_SOURCE } from "../utils/stripeWebhookCore.js";
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -213,7 +214,9 @@ router.post(
         customer_email: email,
         success_url: `${origin}${returnPath}?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}${returnPath}?checkout=canceled`,
-        metadata: { submission_id: String(submissionId), submission_type },
+        // `source` lets the shared Stripe account's other backend (ServerHeat)
+        // recognise -- and ignore -- this session's webhook events.
+        metadata: { submission_id: String(submissionId), submission_type, source: STRIPE_SOURCE },
       });
 
       await pool.query('UPDATE music_submissions SET stripe_session_id = $1 WHERE id = $2', [session.id, submissionId]);
