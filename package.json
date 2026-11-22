@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
+    "test": "node --test test/*.test.js",
     "reset-admin": "node reset-admin.js",
     "register-admin": "node register-admin.js"
   },
